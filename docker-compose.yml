@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  router:
+    build:
+      context: .
+      dockerfile: docker/main.Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./main:/app/main
+      - ./models:/app/models
+
+  neucon:
+    build:
+      context: .
+      dockerfile: docker/model.Dockerfile
+    environment:
+      - MODEL_NAME=neucon
+    volumes:
+      - ./models:/app/models
+      - ./scripts:/app/scripts
+    command: ["python", "scripts/run_dummy_model.py"]
+
+  # modelB:
+    # Another container for a different model

@@ -10,16 +10,16 @@ services:
       - ./main:/app/main
       - ./models:/app/models
 
-  neucon:
-    build:
-      context: .
-      dockerfile: docker/model.Dockerfile
-    environment:
-      - MODEL_NAME=neucon
-    volumes:
-      - ./models:/app/models
-      - ./scripts:/app/scripts
-    command: ["python", "scripts/run_dummy_model.py"]
+  # neucon:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/model.Dockerfile
+  #   environment:
+  #     - MODEL_NAME=neucon
+  #   volumes:
+  #     - ./models:/app/models
+  #     - ./scripts:/app/scripts
+  #   command: ["python", "scripts/run_dummy_model.py"]
 
   # modelB:
     # Another container for a different model

@@ -26,8 +26,13 @@ services:
       - ./models:/app/models
       - ./scripts:/app/scripts
       - ./configs:/app/configs
-    runtime: nvidia
-    entrypoint: ["conda", "run", "--no-capture-output", "-n", "neucon", "env", "PYTHONUNBUFFERED=1", "python", "/app/scripts/neucon_main.py", "--cfg", "/app/configs/neucon.yaml"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+    entrypoint: [app\docker_entrypoint.sh]
 
 
   # modelB:

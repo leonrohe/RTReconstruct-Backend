@@ -34,14 +34,8 @@ COPY models/NeuralRecon/environment.yaml /app/environment.yaml
 RUN conda env create -f /app/environment.yaml && \
     conda clean -ya
 
-# --- Manually Reinstall TorchSparse to Ensure CUDA Extensions Are Built ---
-RUN pip install --force-reinstall \
-    git+https://github.com/mit-han-lab/torchsparse.git@48cc7e23784d35e67163f61b9312df138853025e && \
-    python -c "import torchsparse.backend as backend; assert hasattr(backend, 'hash_cuda'), 'hash_cuda not found!'"
-
-# --- Download Model Checkpoint ---
-RUN mkdir -p /app/models/NeuralRecon/checkpoints && \
-    conda run -n neucon gdown --id 1zKuWqm9weHSm98SZKld1PbEddgLOQkQV -O /app/models/NeuralRecon/checkpoints/model.ckpt
+COPY models/NeuralRecon/docker_entrypoint.sh /app/docker_entrypoint.sh
+RUN chmod +x /app/docker_entrypoint.sh
 
 # --- Final Cleanup ---
 RUN conda clean -a -y && rm -rf ~/.cache/pip

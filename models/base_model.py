@@ -2,7 +2,7 @@ import asyncio
 import json
 import websockets
 from abc import ABC, abstractmethod
-from scripts import utils
+from scripts import myutils
 
 
 class BaseReconstructionModel(ABC):
@@ -19,7 +19,7 @@ class BaseReconstructionModel(ABC):
 
     async def listen(self):
         async for message in self.ws:
-            fragment = utils.DeserializeFragment(message)
+            fragment = myutils.DeserializeFragment(message)
             print(f"[{self.model_name}] Received fragment")
             asyncio.create_task(self.handle_fragment(fragment))
 

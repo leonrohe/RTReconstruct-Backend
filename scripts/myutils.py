@@ -55,9 +55,9 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
 
         image_width = read_float()
         image_height = read_float()
-        image_dimensions = np.array([image_width, image_height], dtype=np.float32)
+        # image_dimensions = np.array([image_width, image_height], dtype=np.float32)
 
-        images.append(Image.open(io.BytesIO(image_data)))
+        images.append(image_data)
     result['images'] = images
 
     # --- Intrinsics ---

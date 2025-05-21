@@ -30,7 +30,7 @@ class BaseReconstructionModel(ABC):
             await asyncio.sleep(1)  # Optional: health check, heartbeat, etc.
 
     @abstractmethod
-    async def handle_fragment(self, fragment: dict):
+    async def handle_fragment(self, fragment: bytes):
         """
         This method must be implemented by subclasses.
         It should process the fragment and send the result via `send_result()`.

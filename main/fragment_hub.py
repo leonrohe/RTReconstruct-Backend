@@ -1,18 +1,16 @@
 import asyncio
 import json
-import io
-import struct
-from typing import Any, Dict
+from typing import Dict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from PIL import Image
-import numpy as np
 import uvicorn
 
 app = FastAPI()
 
+# maps client ID to WebSocket connection
 connected_clients: Dict[str, WebSocket] = {}
-model_queues: Dict[str, asyncio.Queue] = {}
+# maps model name to a queue of fragments 
+model_queues: Dict[str, asyncio.Queue] = {} 
 
 @app.websocket("/ws/client")
 async def websocket_client_endpoint(websocket: WebSocket):
@@ -26,6 +24,8 @@ async def websocket_client_endpoint(websocket: WebSocket):
             data = await websocket.receive_bytes()
             print(f"Received {len(data)} bytes from client: {client_id}")
             
+            # 0:4 : magic, 4:8 : version, 8:12 : window size
+            # TODO: Check magic and version
             mode_name_length = int.from_bytes(data[12:16], 'little')
             model_name = data[16:16 + mode_name_length].decode('utf-8')
             print(f"Forwarding fragment to model: {model_name}")
@@ -48,7 +48,8 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     async def send_task():
         while True:
             fragment = await queue.get()
-            await websocket.send_text(json.dumps(fragment))
+            await websocket.send_bytes(fragment)
+            print(f"Sent {len(fragment)} bytes to model: {model_name}")
 
     send_loop = asyncio.create_task(send_task())
 

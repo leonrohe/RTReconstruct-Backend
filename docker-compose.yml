@@ -4,22 +4,29 @@ services:
     build:
       context: .
       dockerfile: docker/main.Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
     ports:
       - "5000:5000"
     volumes:
       - ./main:/app/main
       - ./models:/app/models
+    entrypoint: ["uvicorn", "main.fragment_hub:app", "--host", "0.0.0.0", "--port", "5000"]
 
-  # neucon:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/model.Dockerfile
-  #   environment:
-  #     - MODEL_NAME=neucon
-  #   volumes:
-  #     - ./models:/app/models
-  #     - ./scripts:/app/scripts
-  #   command: ["python", "scripts/run_dummy_model.py"]
+  neucon:
+    build:
+      context: .
+      dockerfile: docker/neucon.Dockerfile
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - SERVER_URL=ws://router:5000/ws/model
+      - MODEL_NAME=neucon
+    volumes:
+      - ./models:/app/models
+      - ./scripts:/app/scripts
+    entrypoint: ["conda", "run", "--no-capture-output", "-n", "neucon", "env", "PYTHONUNBUFFERED=1", "python", "/app/scripts/neucon_main.py"]
+
 
   # modelB:
     # Another container for a different model

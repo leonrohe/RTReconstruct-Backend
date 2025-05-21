@@ -1,13 +1,18 @@
 import asyncio
 import json
+import io
+import struct
+from typing import Any, Dict
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from typing import Dict
+from PIL import Image
+import numpy as np
 import uvicorn
 
 app = FastAPI()
 
 connected_clients: Dict[str, WebSocket] = {}
-model_queues: Dict[str, asyncio.Queue] = {}  # name -> queue of fragments
+model_queues: Dict[str, asyncio.Queue] = {}
 
 @app.websocket("/ws/client")
 async def websocket_client_endpoint(websocket: WebSocket):
@@ -18,16 +23,17 @@ async def websocket_client_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_text()
-            fragment = json.loads(data)
-            model_name = fragment.get("name")
-            fragment["client_id"] = client_id
-
+            data = await websocket.receive_bytes()
+            print(f"Received {len(data)} bytes from client: {client_id}")
+            
+            mode_name_length = int.from_bytes(data[12:16], 'little')
+            model_name = data[16:16 + mode_name_length].decode('utf-8')
             print(f"Forwarding fragment to model: {model_name}")
+            
             if model_name in model_queues:
-                await model_queues[model_name].put(fragment)
+                await model_queues[model_name].put(data)
             else:
-                await websocket.send_text(json.dumps({"error": "Model not available"}))
+                await websocket.send_text(json.dumps({"error": f"No model with name '{model_name}' found"}))
     except WebSocketDisconnect:
         print(f"Client disconnected: {client_id}")
         del connected_clients[client_id]

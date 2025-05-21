@@ -1,0 +1,3 @@
+[submodule "models/NeuralRecon"]
+	path = models/NeuralRecon
+	url = https://github.com/leonrohe/NeuralRecon.git

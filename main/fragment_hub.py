@@ -1,22 +1,23 @@
 import asyncio
 import json
-from typing import Dict
+from typing import Dict, List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
 
 app = FastAPI()
 
-# maps client ID to WebSocket connection
-connected_clients: Dict[str, WebSocket] = {}
+# List of connected clients
+connected_clients: List[WebSocket] = []
 # maps model name to a queue of fragments 
 model_queues: Dict[str, asyncio.Queue] = {} 
 
 @app.websocket("/ws/client")
 async def websocket_client_endpoint(websocket: WebSocket):
     await websocket.accept()
-    client_id = f"client_{id(websocket)}"
-    connected_clients[client_id] = websocket
+    client_id = str(id(websocket))
+    connected_clients.append(websocket)
+
     print(f"Client connected: {client_id}")
 
     try:
@@ -56,10 +57,8 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     try:
         while True:
             result = await websocket.receive_text()
-            data = json.loads(result)
-            client_id = data.get("client_id")
-            if client_id in connected_clients:
-                await connected_clients[client_id].send_text(json.dumps(data))
+            for client in connected_clients:
+                await client.send_text(result)
     except WebSocketDisconnect:
         print(f"Model {model_name} disconnected")
         send_loop.cancel()

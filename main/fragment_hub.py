@@ -7,8 +7,8 @@ import uvicorn
 
 app = FastAPI()
 
-# List of connected clients
-connected_clients: List[WebSocket] = []
+# maps client id to websocket
+connected_clients: Dict[str, WebSocket] = {}
 # maps model name to a queue of fragments 
 model_queues: Dict[str, asyncio.Queue] = {} 
 
@@ -16,7 +16,7 @@ model_queues: Dict[str, asyncio.Queue] = {}
 async def websocket_client_endpoint(websocket: WebSocket):
     await websocket.accept()
     client_id = str(id(websocket))
-    connected_clients.append(websocket)
+    connected_clients[client_id] = websocket
 
     print(f"Client connected: {client_id}")
 
@@ -57,8 +57,9 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     try:
         while True:
             result = await websocket.receive_text()
-            for client in connected_clients:
+            for client_id, client in connected_clients.items():
                 await client.send_text(result)
+                print(f"Sent result to client: {client_id}")
     except WebSocketDisconnect:
         print(f"Model {model_name} disconnected")
         send_loop.cancel()

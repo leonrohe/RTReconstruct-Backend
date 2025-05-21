@@ -25,7 +25,9 @@ services:
     volumes:
       - ./models:/app/models
       - ./scripts:/app/scripts
-    entrypoint: ["conda", "run", "--no-capture-output", "-n", "neucon", "env", "PYTHONUNBUFFERED=1", "python", "/app/scripts/neucon_main.py"]
+      - ./configs:/app/configs
+    runtime: nvidia
+    entrypoint: ["conda", "run", "--no-capture-output", "-n", "neucon", "env", "PYTHONUNBUFFERED=1", "python", "/app/scripts/neucon_main.py", "--cfg", "/app/configs/neucon.yaml"]
 
 
   # modelB:

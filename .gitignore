@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+*.env
+
+# VS Code
+.vscode/
+.history/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test & coverage
+htmlcov/
+.coverage
+.tox/
+.nox/
+.cache/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Docker
+*.pid
+*.sock
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Requirements
+pip-wheel-metadata/
+
+# Ignore secrets
+*.env.*
+secrets.json
+
+# Ignore data/output folders (customize as needed)
+data/
+output/

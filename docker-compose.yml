@@ -32,7 +32,7 @@ services:
           devices:
             - capabilities: [gpu]
 
-    entrypoint: [app\docker_entrypoint.sh]
+    entrypoint: ["/app/docker_entrypoint.sh"]
 
 
   # modelB:

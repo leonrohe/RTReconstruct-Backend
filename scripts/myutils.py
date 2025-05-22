@@ -65,11 +65,11 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
     for _ in range(fragment_window):
         focal_length_x = read_float()
         focal_length_y = read_float()
-        focal_length = np.array([focal_length_x, focal_length_y], dtype=np.float32)
+        focal_length = np.array([focal_length_x, focal_length_y], dtype=float)
 
         principal_point_x = read_float()
         principal_point_y = read_float()
-        principal_point = np.array([principal_point_x, principal_point_y], dtype=np.float32)
+        principal_point = np.array([principal_point_x, principal_point_y], dtype=float)
 
         intrinsics.append({
             'focal_length': focal_length,
@@ -83,13 +83,13 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
         camera_position_x = read_float()
         camera_position_y = read_float()
         camera_position_z = read_float()
-        camera_position = np.array([camera_position_x, camera_position_y, camera_position_z], dtype=np.float32)
+        camera_position = np.array([camera_position_x, camera_position_y, camera_position_z], dtype=float)
 
         camera_rotation_x = read_float()
         camera_rotation_y = read_float()
         camera_rotation_z = read_float()
         camera_rotation_w = read_float()
-        camera_rotation = np.array([camera_rotation_x, camera_rotation_y, camera_rotation_z, camera_rotation_w], dtype=np.float32)
+        camera_rotation = np.array([camera_rotation_x, camera_rotation_y, camera_rotation_z, camera_rotation_w], dtype=float)
 
         extrinsics.append({
             'camera_position': camera_position,

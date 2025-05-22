@@ -30,8 +30,10 @@ class NeuConReconstructionModel(BaseReconstructionModel):
     NeuConReconstructionModel is a subclass of BaseReconstructionModel.
     It is designed to handle the reconstruction of fragments from a WebSocket connection.
     """
+
     def __init__(self, model_name: str, server_url: str = SERVER_URL):
         super().__init__(model_name, server_url)
+        self.fragmentIndex = 0
 
     async def handle_fragment(self, fragment: dict):
         global MODEL, TRANSFORMS
@@ -42,29 +44,35 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 'imgs': neucon_fragment["images"],
                 'intrinsics': np.stack(neucon_fragment['intrinsics']),
                 'extrinsics': np.stack(neucon_fragment['extrinsics']),
-                'scene': "",
-                'fragment': "",
+                'scene': "test_scene",
+                'fragment': f"test_scene_{self.fragmentIndex}",
                 'epoch': [None],
                 'vol_origin': np.array([0, 0, 0])
             }
+
             item = TRANSFORMS(item)
             item = default_collate([item])
         except Exception as e:
+            print("Error during fragment processing:", e)
+            print(traceback.format_exc())
             await self.send_result({"error": f"Failed to load and process fragment.pkl.\nError: {e}"})
             return
 
-        with torch.no_grad():
-            try:
+        try:
+            with torch.no_grad():
                 outputs, _ = MODEL(item, True)
+                self.fragmentIndex += 1
                 print("Inference complete.")
-                scene_tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
-            except Exception as e:
-                # throw stacktrace
-                await self.send_result({"error": f"Failed to run inference.\nError: {e}\nTraceback: {traceback.format_exc()}"})
-                return
 
-        print(scene_tsdf)
-        await self.send_result(pickle.dumps(scene_tsdf))
+                print("Outputs", outputs)
+
+                scene_tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
+                await self.send_result(pickle.dumps(scene_tsdf));
+        except Exception as e:
+            print("Error during inference:", e)
+            print(traceback.format_exc())
+            await self.send_result({"error": f"Failed to run inference.\nError: {e}\nTraceback: {traceback.format_exc()}"})
+            return
     
     def base_fragment_to_neucon_fragment(self, fragment: dict) -> dict:
         from transforms3d.quaternions import quat2mat
@@ -73,23 +81,26 @@ class NeuConReconstructionModel(BaseReconstructionModel):
             image = Image.open(io.BytesIO(image)).convert("RGB")
             return image
         
-        def transform_pose(pose: dict, use_homogenous=True) -> np.ndarray:
-            def rotx(theta):
-                """Rotation matrix around X-axis."""
-                return np.array([
-                    [1, 0, 0],
-                    [0, np.cos(theta), -np.sin(theta)],
-                    [0, np.sin(theta),  np.cos(theta)]
-                ], dtype=np.float32)
+        def transform_pose(pose: dict, use_homogenous=True):
+            from transforms3d.quaternions import quat2mat
+
+            def rotx(t):
+                ''' 3D Rotation about the x-axis. '''
+                c = np.cos(t)
+                s = np.sin(t)
+                return np.array([[1, 0, 0],
+                                [0, c, -s],
+                                [0, s, c]])
 
             trans = pose['camera_position']
             quat = pose['camera_rotation']
 
-            # ARKit quaternions are [x, y, z, w] → convert to [w, x, y, z]
-            quat_wxyz = np.append(quat[3], quat[:3])
-            rot_mat = quat2mat(quat_wxyz.tolist())
+            trans[-1] = -trans[-1]
+            quat[0] = -quat[0]
+            quat[1] = -quat[1]
 
-            # ARKit coordinate adjustment
+
+            rot_mat = quat2mat(np.append(quat[-1], quat[:3]).tolist())
             rot_mat = rot_mat.dot(np.array([
                 [1, 0, 0],
                 [0, -1, 0],
@@ -98,27 +109,29 @@ class NeuConReconstructionModel(BaseReconstructionModel):
             rot_mat = rotx(np.pi / 2) @ rot_mat
             trans = rotx(np.pi / 2) @ trans
 
-            # Compose 3x4 pose matrix
-            trans_mat = np.zeros((3, 4), dtype=np.float32)
-            trans_mat[:, :3] = rot_mat
-            trans_mat[:, 3] = trans
-
-            # Make it 4x4 if needed
+            trans_mat = np.zeros([3, 4])
+            trans_mat[:3, :3] = rot_mat
+            trans_mat[:3, 3] = trans
             if use_homogenous:
                 trans_mat = np.vstack((trans_mat, [0, 0, 0, 1]))
+            
+            # Idek why this is needed, but it is in the original code
+            # Fun Fact: This took me the whole day to figure out :))
+            trans_mat[2, 3] += 1.5 
 
             return trans_mat
-        
-        def transform_intrinsics(intrinsics: dict) -> np.ndarray:
+
+        # may need to scale them based on original image size late on
+        def transform_intrinsics(intrinsics: dict):
             fx, fy = intrinsics['focal_length']
             cx, cy = intrinsics['principal_point']
-            
+
             K = np.array([
                 [fx, 0, cx],
                 [0, fy, cy],
                 [0,  0,  1]
             ], dtype=np.float32)
-            
+
             return K
 
         return {

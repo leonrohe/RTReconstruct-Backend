@@ -23,8 +23,8 @@ class BaseReconstructionModel(ABC):
             print(f"[{self.model_name}] Received fragment")
             asyncio.create_task(self.handle_fragment(fragment))
 
-    async def send_result(self, result: dict):
-        await self.ws.send(json.dumps(result))
+    async def send_result(self, result: bytes):
+        await self.ws.send(result)
 
     async def process_loop(self):
         while True:

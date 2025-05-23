@@ -14,6 +14,7 @@ from models.NeuralRecon.datasets import transforms
 from models.NeuralRecon.models.neuralrecon import NeuralRecon
 from models.base_model import BaseReconstructionModel
 from models.NeuralRecon.config import cfg, update_config
+from models.NeuralRecon.utils import SaveScene
 
 SERVER_URL = os.getenv("SERVER_URL", "ws://router:5000/ws/model")
 TRANSFORMS = transforms.Compose([
@@ -40,12 +41,15 @@ class NeuConReconstructionModel(BaseReconstructionModel):
 
         try:
             neucon_fragment = self.base_fragment_to_neucon_fragment(fragment)
+
+            scene_name = "test_scene"
+            fragment_name = f"test_scene_{self.fragmentIndex}"
             item = {
                 'imgs': neucon_fragment["images"],
                 'intrinsics': np.stack(neucon_fragment['intrinsics']),
                 'extrinsics': np.stack(neucon_fragment['extrinsics']),
-                'scene': "test_scene",
-                'fragment': f"test_scene_{self.fragmentIndex}",
+                'scene': scene_name,
+                'fragment': fragment_name,
                 'epoch': [None],
                 'vol_origin': np.array([0, 0, 0])
             }
@@ -55,7 +59,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
         except Exception as e:
             print("Error during fragment processing:", e)
             print(traceback.format_exc())
-            await self.send_result({"error": f"Failed to load and process fragment.pkl.\nError: {e}"})
+            await self.send_result(json.dumps({"error": f"Failed to load and process fragment.pkl.\nError: {e}"}))
             return
 
         try:
@@ -64,14 +68,24 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 self.fragmentIndex += 1
                 print("Inference complete.")
 
-                print("Outputs", outputs)
+                if outputs == {}:
+                    print("No output from the model.")
+                    await self.send_result(json.dumps({"error": "No output from the model."}))
+                    return   
 
-                scene_tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
-                await self.send_result(pickle.dumps(scene_tsdf));
+                tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
+                origin = outputs['origin'][0].data.cpu().numpy()
+                origin[2] -= 1.5
+
+                mesh = SaveScene.tsdf2mesh(cfg.MODEL.VOXEL_SIZE, origin, tsdf)
+                mesh_obj = mesh.export(file_type='obj')
+
+                await self.send_result(mesh_obj)
+                return
         except Exception as e:
             print("Error during inference:", e)
             print(traceback.format_exc())
-            await self.send_result({"error": f"Failed to run inference.\nError: {e}\nTraceback: {traceback.format_exc()}"})
+            await self.send_result(json.dumps({"error": f"Failed to run inference.\nError: {e}\nTraceback: {traceback.format_exc()}"}))
             return
     
     def base_fragment_to_neucon_fragment(self, fragment: dict) -> dict:
@@ -116,6 +130,8 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 trans_mat = np.vstack((trans_mat, [0, 0, 0, 1]))
             
             # Idek why this is needed, but it is in the original code
+            # Supposedly to match the training data
+            # lets just hardcode this value, yayyy
             # Fun Fact: This took me the whole day to figure out :))
             trans_mat[2, 3] += 1.5 
 

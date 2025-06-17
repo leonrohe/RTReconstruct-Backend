@@ -1,3 +1,6 @@
 [submodule "models/NeuralRecon"]
 	path = models/NeuralRecon
 	url = https://github.com/leonrohe/NeuralRecon.git
+[submodule "models/SLAM3R"]
+	path = models/SLAM3R
+	url = https://github.com/leonrohe/SLAM3R.git

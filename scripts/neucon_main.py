@@ -16,6 +16,7 @@ from models.base_model import BaseReconstructionModel
 from models.NeuralRecon.config import cfg, update_config
 from models.NeuralRecon.utils import SaveScene
 
+MODEL_NAME = os.getenv("MODEL_NAME", "neucon")
 SERVER_URL = os.getenv("SERVER_URL", "ws://router:5000/ws/model")
 TRANSFORMS = transforms.Compose([
     transforms.ResizeImage((640, 480)),
@@ -189,5 +190,5 @@ if __name__ == "__main__":
     MODEL.load_state_dict(STATE_DICT['model'], strict=False)
 
     # --------------------- WEBSOCKET CONNECTION ---------------------
-    model = NeuConReconstructionModel("neural_recon")
+    model = NeuConReconstructionModel(MODEL_NAME)
     asyncio.run(model.connect())

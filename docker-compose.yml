@@ -34,6 +34,20 @@ services:
 
     entrypoint: ["/app/docker_entrypoint.sh"]
 
+  slam3r:
+    build:
+      context: .
+      dockerfile: docker/slam3r.Dockerfile
+    environment:
+      - SERVER_URL=ws://router:5000/ws/model
+      - MODEL_NAME=slam3r
+    volumes:
+      - ./models:/app/models
+      - ./scripts:/app/scripts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
 
-  # modelB:
-    # Another container for a different model
+    entrypoint: ["/app/docker_entrypoint.sh"]

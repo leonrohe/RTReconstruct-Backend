@@ -56,9 +56,9 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 
     try:
         while True:
-            result = await websocket.receive_text()
+            result = await websocket.receive_bytes()
             for client_id, client in connected_clients.items():
-                await client.send_text(result)
+                await client.send_bytes(result)
                 print(f"Sent result to client: {client_id}")
     except WebSocketDisconnect:
         print(f"Model {model_name} disconnected")

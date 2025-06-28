@@ -79,10 +79,9 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 origin[2] -= 1.5
 
                 mesh = SaveScene.tsdf2mesh(cfg.MODEL.VOXEL_SIZE, origin, tsdf)
-                mesh_obj = mesh.export(file_type='obj')
+                glb_bytes = mesh.export(file_type='glb')
 
-                await self.send_result(mesh_obj)
-                return
+                await self.send_result(glb_bytes)
         except Exception as e:
             print("Error during inference:", e)
             print(traceback.format_exc())

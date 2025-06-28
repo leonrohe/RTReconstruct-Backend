@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 import torch
 import numpy as np
 
@@ -30,6 +31,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
     It is designed to handle the reconstruction of fragments from a WebSocket connection.
     """
 
+
     def __init__(self,
                  model_name: str,
                  server_url: str,
@@ -39,8 +41,30 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
         self.i2p_model = i2p_model
         self.l2w_model = l2w_model
 
+        self.scene = SLAM3RScene()
+
     async def handle_fragment(self, fragment: dict):
-        print(f"{self.model_name} received fragment: {fragment}")
+        tmp_img_dir = Path("/tmp/tmp_images")
+        tmp_img_dir.mkdir(parents=True, exist_ok=True)
+
+        # Clear the directory first
+        for f in tmp_img_dir.glob("*.jpg"):
+            f.unlink()
+
+        # Save images
+        for idx, img_bytes in enumerate(fragment['images']):
+            img_path = tmp_img_dir / f"image_{idx:04d}.jpg"
+            with open(img_path, 'wb') as f:
+                f.write(img_bytes)
+
+        # Call your processing function
+        (glb_bytes, _) = self.recon_scene_batched(
+                            self.scene,
+                            self.i2p_model,
+                            self.l2w_model,
+                            str(tmp_img_dir))
+        
+        await self.send_result(glb_bytes)
 
     def recon_scene_batched(self,
                             scene: SLAM3RScene,
@@ -263,14 +287,79 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
             idx = scene.get_global_idx(i)
             scene.per_frame_res['rgb_imgs'][idx] = rgb_imgs[i]
 
-        save_path = get_model_from_scene(per_frame_res=scene.per_frame_res, 
-                                        save_dir=save_dir, 
-                                        num_points_save=num_points_save, 
-                                        conf_thres_res=conf_thres_l2w)
+        glb_bytes = self.get_model_from_scene(per_frame_res=scene.per_frame_res, 
+                                              save_dir="/tmp/tmp_results", 
+                                              num_points_save=250000, 
+                                              conf_thres_res=conf_thres_l2w)
 
         scene.batch_idx += 1
 
-        return save_path, scene.per_frame_res
+        return glb_bytes, scene.per_frame_res
+
+    def get_model_from_scene(self, 
+                             per_frame_res, save_dir, 
+                             num_points_save=200000, 
+                             conf_thres_res=3, 
+                             valid_masks=None):  
+        # collect the registered point clouds and rgb colors
+        pcds = []
+        rgbs = []
+        pred_frame_num = len(per_frame_res['l2w_pcds'])
+        registered_confs = per_frame_res['l2w_confs']   
+        registered_pcds = per_frame_res['l2w_pcds']
+        rgb_imgs = per_frame_res['rgb_imgs']
+        for i in range(pred_frame_num):
+            registered_pcd = to_numpy(registered_pcds[i])
+            if registered_pcd.shape[0] == 3:
+                registered_pcd = registered_pcd.transpose(1,2,0)
+            registered_pcd = registered_pcd.reshape(-1,3)
+            rgb = rgb_imgs[i].reshape(-1,3)
+            pcds.append(registered_pcd)
+            rgbs.append(rgb)
+            
+        res_pcds = np.concatenate(pcds, axis=0)
+        res_rgbs = np.concatenate(rgbs, axis=0)
+        
+        pts_count = len(res_pcds)
+        valid_ids = np.arange(pts_count)
+        
+        # filter out points with gt valid masks
+        if valid_masks is not None:
+            valid_masks = np.stack(valid_masks, axis=0).reshape(-1)
+            # print('filter out ratio of points by gt valid masks:', 1.-valid_masks.astype(float).mean())
+        else:
+            valid_masks = np.ones(pts_count, dtype=bool)
+        
+        # filter out points with low confidence
+        if registered_confs is not None:
+            conf_masks = []
+            for i in range(len(registered_confs)):
+                conf = registered_confs[i]
+                conf_mask = (conf > conf_thres_res).reshape(-1).cpu() 
+                conf_masks.append(conf_mask)
+            conf_masks = np.array(torch.cat(conf_masks))
+            valid_ids = valid_ids[conf_masks&valid_masks]
+            print('ratio of points filered out: {:.2f}%'.format((1.-len(valid_ids)/pts_count)*100))
+        
+        # sample from the resulting pcd consisting of all frames
+        n_samples = min(num_points_save, len(valid_ids))
+        print(f"resampling {n_samples} points from {len(valid_ids)} points")
+        sampled_idx = np.random.choice(valid_ids, n_samples, replace=False)
+        sampled_pts = res_pcds[sampled_idx]
+        sampled_rgbs = res_rgbs[sampled_idx]
+        sampled_pts[:, :2] *= -1 # flip the x,y axis for better visualization
+        
+        Path(save_dir).mkdir(exist_ok=True)
+
+        save_name = f"recon.glb"
+        scene = trimesh.Scene()
+        scene.add_geometry(trimesh.PointCloud(vertices=sampled_pts, colors=sampled_rgbs/255.))
+        save_path = join(save_dir, save_name)
+        scene.export(save_path)
+
+        glb_bytes = scene.export(file_type='glb')
+
+        return glb_bytes
 
 MODEL_NAME = os.getenv("MODEL_NAME", "slam3r")
 SERVER_URL = os.getenv("SERVER_URL", "ws://router:5000/ws/model")

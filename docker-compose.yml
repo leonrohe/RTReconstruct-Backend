@@ -10,6 +10,7 @@ services:
       - "5000:5000"
     volumes:
       - ./main:/app/main
+      - ./scripts:/app/scripts
       - ./models:/app/models
     entrypoint: ["uvicorn", "main.fragment_hub:app", "--host", "0.0.0.0", "--port", "5000"]
 

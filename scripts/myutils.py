@@ -6,6 +6,29 @@ from typing import Any, Dict
 
 import numpy as np
 
+class ModelResult():
+    def __init__(self, scene_name: str, output: bytes):
+        self.scene_name = scene_name
+        self.output = output
+        self.version = 2
+
+    def Serialize(self) -> bytes:
+        """
+        Serialize the model result to bytes.
+        This method should be implemented by subclasses.
+        """
+        scene_name_bytes = self.scene_name.encode('utf-8')
+        scene_name_length = len(scene_name_bytes)
+
+        # Prepare the output with scene name length and scene name as single byte array
+        result = (
+            b'LEON',
+            self.version.to_bytes(4, 'little'),
+            scene_name_length.to_bytes(4, 'little') +
+            scene_name_bytes +  # Scene name bytes
+            self.output  # Actual output data
+        )
+        return result
 
 def DeserializeFragment(data: bytes) -> Dict[str, Any]:
     mv = memoryview(data)
@@ -33,19 +56,21 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
 
     # --- Fragment Header ---
     fragment_magic = read_bytes(4)
-    if fragment_magic != b'LEON':
-        print(f"Invalid magic bytes: {fragment_magic}")
-        return {}
+    assert fragment_magic == b'LEON', f"Invalid magic bytes: {fragment_magic}"
 
     fragment_version = read_uint32()
-    # print(f"Fragment version: {fragment_version}")
+    assert fragment_version == 1, f"Unsupported version: {fragment_version}"
 
     fragment_window = read_uint32()
-    # print(f"Fragment window size: {fragment_window}")
+    result['window_size'] = fragment_window
 
     model_name_length = read_uint32()
     model_name = read_bytes(model_name_length).decode('utf-8')
-    # print(f"Model name: {model_name}")
+    result['model_name'] = model_name
+
+    scene_name_length = read_uint32()
+    scene_name = read_bytes(scene_name_length).decode('utf-8')
+    result['scene_name'] = scene_name
 
     # --- Images ---
     images = []
@@ -98,3 +123,40 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
     result['extrinsics'] = extrinsics
 
     return result
+
+def DeserializeResult(data: bytes) -> ModelResult:
+    """
+    Deserialize the model result from bytes.
+    This function assumes the data is in the format defined by ModelResult.Serialize().
+    """
+    mv = memoryview(data)
+    offset = 0
+
+    def read_bytes(length: int) -> bytes:
+        nonlocal offset
+        val = mv[offset:offset+length]
+        offset += length
+        return val.tobytes()
+
+    def read_uint32() -> int:
+        nonlocal offset
+        val = struct.unpack_from('<I', mv, offset)[0]
+        offset += 4
+        return val
+
+    # Read magic bytes
+    magic = read_bytes(4)
+    assert magic == b'LEON', f"Invalid magic bytes: {magic}"
+
+    # Read version
+    version = read_uint32()
+    assert version == 2, f"Unsupported version: {version}"
+
+    # Read scene name length and scene name
+    scene_name_length = read_uint32()
+    scene_name = read_bytes(scene_name_length).decode('utf-8')
+
+    # Read output data
+    output = mv[offset:].tobytes()
+
+    return ModelResult(scene_name, output)

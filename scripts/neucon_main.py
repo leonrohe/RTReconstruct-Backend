@@ -44,7 +44,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
             neucon_fragment = self.base_fragment_to_neucon_fragment(fragment)
 
             scene_name = "test_scene"
-            fragment_name = f"test_scene_{self.fragmentIndex}"
+            fragment_name = f"{scene_name}_{self.fragmentIndex}"
             item = {
                 'imgs': neucon_fragment["images"],
                 'intrinsics': np.stack(neucon_fragment['intrinsics']),

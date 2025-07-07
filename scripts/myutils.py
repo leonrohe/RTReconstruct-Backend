@@ -38,14 +38,14 @@ def DeserializeFragment(data: bytes) -> Dict[str, Any]:
         return {}
 
     fragment_version = read_uint32()
-    print(f"Fragment version: {fragment_version}")
+    # print(f"Fragment version: {fragment_version}")
 
     fragment_window = read_uint32()
-    print(f"Fragment window size: {fragment_window}")
+    # print(f"Fragment window size: {fragment_window}")
 
     model_name_length = read_uint32()
     model_name = read_bytes(model_name_length).decode('utf-8')
-    print(f"Model name: {model_name}")
+    # print(f"Model name: {model_name}")
 
     # --- Images ---
     images = []

@@ -5,22 +5,17 @@ from typing import Dict, List, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
 
-import traceback
-
 # Start FastAPI app
 app = FastAPI()
 
 # maps client id to websocket
 connected_clients: Dict[str, WebSocket] = {}
-
-# map scene to client id
+# maps scene to client id for sending model outputs
 scene_clients: Dict[str, Set[str]] = {}
-
+# maps client id to asyncio.Event for notifying when model outputs are ready
 client_events: Dict[str, asyncio.Event] = {}
-
-# maps model name to a queue of fragments to be processed
+# maps model name to a queue of fragments to be processed (no need to sort by scene name)
 model_inputs: Dict[str, asyncio.Queue] = {} 
-
 # maps scene name to a dictionary of model outputs, e.g. {'test_scene': {'neucon': b'...', 'slam3r': b'...'}}
 model_outputs: Dict[str, Dict[str, bytes]] = {}
 
@@ -78,20 +73,9 @@ async def websocket_client_endpoint(websocket: WebSocket):
 async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     await websocket.accept()
 
-    queue = asyncio.Queue(maxsize=100)
+    queue = asyncio.Queue()
     model_inputs[model_name] = queue
     print(f"Model [{model_name}] connected")
-
-    # async def send_task():
-    #     try:
-    #         while True:
-    #             fragment = await queue.get()
-    #             await websocket.send_bytes(fragment)
-    #             print(f"Sent {len(fragment)} bytes to model: {model_name}")
-    #     except Exception as e:
-    #         print(f"Send task error for model {model_name}: {e}")
-
-    # send_loop = asyncio.create_task(send_task())
 
     try:
         while True:
@@ -110,10 +94,8 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 
     except WebSocketDisconnect as e:
         print(f"Model {model_name} disconnected, because: {e}")
-        traceback.print_exc()
     finally:
-        # send_loop.cancel()
         del model_inputs[model_name]
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", ws_ping_timeout=300, log_level='debug', ws_max_size=None, port=5000)
+    uvicorn.run(app, host="0.0.0.0", ws_max_size=None, port=5000)

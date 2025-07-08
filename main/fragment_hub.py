@@ -93,9 +93,11 @@ async def websocket_client_endpoint(websocket: WebSocket):
             # 0:4 : magic, 4:8 : version, 8:12 : window size
             model_name_length = int.from_bytes(data[12:12 + 4], 'little')
             model_name = data[16:16 + model_name_length].decode('utf-8')
+            scene_name_length = int.from_bytes(data[16 + model_name_length:16 + model_name_length + 4], 'little')
+            scene_name = data[20 + model_name_length:20 + model_name_length + scene_name_length].decode('utf-8')
+            print(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
 
             if model_name in model_inputs:
-                print(f"Received data for model: {model_name} from client: {client_id}")
                 await model_inputs[model_name].put(data)
             else:
                 print(f"Model {model_name} not found, sending error to client")

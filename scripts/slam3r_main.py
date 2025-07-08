@@ -41,9 +41,11 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
         self.i2p_model = i2p_model
         self.l2w_model = l2w_model
 
-        self.scene = SLAM3RScene()
+        self.scenes = {}
 
     async def handle_fragment(self, fragment: dict):
+        scene: SLAM3RScene = self.scenes.setdefault(fragment['scene_name'], SLAM3RScene())
+
         tmp_img_dir = Path("/tmp/tmp_images")
         tmp_img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +61,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
 
         # Call your processing function
         (glb_bytes, _) = self.recon_scene_batched(
-                            self.scene,
+                            scene,
                             self.i2p_model,
                             self.l2w_model,
                             str(tmp_img_dir))

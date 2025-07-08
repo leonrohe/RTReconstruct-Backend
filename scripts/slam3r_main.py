@@ -64,7 +64,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                             self.l2w_model,
                             str(tmp_img_dir))
         
-        await self.send_result(glb_bytes)
+        await self.send_result(fragment['scene_name'], glb_bytes)
 
     def recon_scene_batched(self,
                             scene: SLAM3RScene,

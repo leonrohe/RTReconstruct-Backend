@@ -57,17 +57,15 @@ class BaseReconstructionModel(ABC):
             fragment = myutils.DeserializeFragment(message)
             asyncio.create_task(self.handle_fragment(fragment))
 
-    async def send_result(self, scene: str, output: bytes):
+    async def send_result(self, result: myutils.ModelResult):
         """
         Sends the processed result back to the server.
 
         Args:
-            scene (str): The scene name associated with the result.
-            output (bytes): The serialized model output.
+            result (myutils.ModelResult): The result to send back to the server.
         """
         try:
             print("Sending result to server...")
-            result = myutils.ModelResult(scene, output)
             result_bytes = result.Serialize()
             await self.ws.send(result_bytes)
             print(f"[{self.model_name}] Sent {len(result_bytes)} bytes")

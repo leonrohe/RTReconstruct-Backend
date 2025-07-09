@@ -23,7 +23,7 @@ client_events: Dict[str, asyncio.Event] = {}
 # Maps model name to a queue of fragments to be processed
 model_inputs: Dict[str, asyncio.Queue] = {}
 # Maps scene name to a dictionary of model outputs, e.g. {'scene1': {'neucon': b'...', 'slam3r': b'...'}}
-model_outputs: Dict[str, Dict[str, bytes]] = {}
+model_outputs: Dict[str, Dict[str, myutils.ModelResult]] = {}
 
 # =========================
 # Client WebSocket Endpoint
@@ -64,7 +64,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
     if client_scene in model_outputs:
         print(f"Sending model outputs for scene: {client_scene} to client: {client_id}")
         for model_name, result in model_outputs[client_scene].items():
-            await websocket.send_bytes(result)
+            await websocket.send_bytes(result.output)
     else:
         print(f"No model outputs available for scene: {client_scene}")
 
@@ -77,9 +77,9 @@ async def websocket_client_endpoint(websocket: WebSocket):
 
                 # Send all available model outputs for the client's scene
                 if client_id in scene_clients.get(client_scene, set()):
-                    for model_name, result in model_outputs.get(client_scene, {}).items():
+                    for model_name, model_result in model_outputs.get(client_scene, {}).items():
                         print(f"Sending model output for scene: {client_scene}, model: {model_name} to client: {client_id}")
-                        await websocket.send_bytes(result)
+                        await websocket.send_bytes(model_result.output)
         except Exception as e:
             print(f"Send task error for client {client_id}: {e}")
 
@@ -135,9 +135,10 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
             # Wait for the model's result
             result_bytes: bytes = await websocket.receive_bytes()
             result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
+            print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
 
             # Store the result by scene and model
-            model_outputs.setdefault(result.scene_name, {})[model_name] = result.output
+            model_outputs.setdefault(result.scene_name, {})[model_name] = result
 
             # Notify all clients interested in this scene
             for client_id in scene_clients.get(result.scene_name, set()):

@@ -10,6 +10,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data._utils.collate import default_collate
+from myutils import ModelResult
 from models.NeuralRecon.datasets import transforms
 from models.NeuralRecon.models.neuralrecon import NeuralRecon
 from models.base_model import BaseReconstructionModel
@@ -80,8 +81,9 @@ class NeuConReconstructionModel(BaseReconstructionModel):
 
                 mesh = SaveScene.tsdf2mesh(cfg.MODEL.VOXEL_SIZE, origin, tsdf)
                 glb_bytes = mesh.export(file_type='glb')
+                result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, False)
 
-                await self.send_result(fragment['scene_name'], glb_bytes)
+                await self.send_result(result)
         except Exception as e:
             print("Error during inference:", e)
             print(traceback.format_exc())

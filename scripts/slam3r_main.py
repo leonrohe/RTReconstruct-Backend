@@ -2,6 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import torch
+from myutils import ModelResult
 import numpy as np
 
 from models.base_model import BaseReconstructionModel
@@ -65,8 +66,9 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                             self.i2p_model,
                             self.l2w_model,
                             str(tmp_img_dir))
+        result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, True) 
         
-        await self.send_result(fragment['scene_name'], glb_bytes)
+        await self.send_result(result)
 
     def recon_scene_batched(self,
                             scene: SLAM3RScene,
@@ -291,7 +293,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
 
         glb_bytes = self.get_model_from_scene(per_frame_res=scene.per_frame_res, 
                                               save_dir="/tmp/tmp_results", 
-                                              num_points_save=250000, 
+                                              num_points_save=500000, 
                                               conf_thres_res=conf_thres_l2w)
 
         scene.batch_idx += 1

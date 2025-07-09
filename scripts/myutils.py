@@ -6,28 +6,53 @@ from typing import Any, Dict
 
 import numpy as np
 
+
 class ModelResult():
-    def __init__(self, scene_name: str, output: bytes):
-        self.scene_name = scene_name
-        self.output = output
+    def __init__(self, scene_name: str, output: bytes, is_pointcloud: bool = False):
         self.version = 2
+
+        self.scene_name = scene_name
+        self.is_pointcloud = is_pointcloud
+        self.output = output
+
+        self.transform = (0.0, 0.0, 0.0)        # Translation (x, y, z)
+        self.scale = (1.0, 1.0, 1.0)            # Scale (sx, sy, sz)
+        self.rotation = (0.0, 0.0, 0.0, 1.0)    # Quaternion (x, y, z, w)
+
+    def SetTranslation(self, x: float, y: float, z: float):
+        self.transform = (x, y, z)
+
+    def SetRotation(self, x: float, y: float, z: float, w: float):
+        self.rotation = (x, y, z, w)
+
+    def SetScale(self, sx: float, sy: float, sz: float):
+        self.scale = (sx, sy, sz)
 
     def Serialize(self) -> bytes:
         """
-        Serialize the model result to bytes.
-        This method should be implemented by subclasses.
+        Serialize the model result to bytes using struct for all numeric values.
         """
         scene_name_bytes = self.scene_name.encode('utf-8')
         scene_name_length = len(scene_name_bytes)
 
-        # Prepare the output with scene name length and scene name as single byte array
-        result = (
-            b'LEON',
-            self.version.to_bytes(4, 'little'),
-            scene_name_length.to_bytes(4, 'little') +
-            scene_name_bytes +  # Scene name bytes
-            self.output  # Actual output data
+        # Pack header: magic, version, scene_name_length
+        header = (
+            b'LEON' +
+            struct.pack('<I', self.version) +
+            struct.pack('<I', scene_name_length) +
+            scene_name_bytes
         )
+        
+        # Pack isPointcloud flag
+        is_pointcloud_byte = struct.pack('<?', self.is_pointcloud)
+
+        # Pack transform (3 floats), rotation (4 floats), scale (3 floats)
+        transform_bytes = struct.pack('<3f', *self.transform)
+        rotation_bytes = struct.pack('<4f', *self.rotation)
+        scale_bytes = struct.pack('<3f', *self.scale)
+
+        # Concatenate all parts
+        result = header + is_pointcloud_byte + transform_bytes + rotation_bytes + scale_bytes + self.output
         return result
 
 def DeserializeFragment(data: bytes) -> Dict[str, Any]:
@@ -138,9 +163,21 @@ def DeserializeResult(data: bytes) -> ModelResult:
         offset += length
         return val.tobytes()
 
+    def read_bool() -> bool:
+        nonlocal offset
+        val = struct.unpack_from('<?', mv, offset)[0]
+        offset += 1
+        return val
+
     def read_uint32() -> int:
         nonlocal offset
         val = struct.unpack_from('<I', mv, offset)[0]
+        offset += 4
+        return val
+    
+    def read_float() -> float:
+        nonlocal offset
+        val = struct.unpack_from('<f', mv, offset)[0]
         offset += 4
         return val
 
@@ -156,7 +193,36 @@ def DeserializeResult(data: bytes) -> ModelResult:
     scene_name_length = read_uint32()
     scene_name = read_bytes(scene_name_length).decode('utf-8')
 
+    is_pointcloud = read_bool()
+
+    # Read translation
+    transform = (
+        read_float(),  # x
+        read_float(),  # y
+        read_float()   # z
+    )
+
+    # Read rotation (quaternion)
+    rotation = (
+        read_float(),  # x
+        read_float(),  # y
+        read_float(),  # z
+        read_float()   # w
+    )
+
+    # Read scale
+    scale = (
+        read_float(),  # sx
+        read_float(),  # sy
+        read_float()   # sz
+    )
+
     # Read output data
     output = mv[offset:].tobytes()
 
-    return ModelResult(scene_name, output)
+    result: ModelResult = ModelResult(scene_name, output, is_pointcloud)
+    result.SetTranslation(*transform)
+    result.SetRotation(*rotation)
+    result.SetScale(*scale)
+
+    return result

@@ -9,9 +9,9 @@ import logging
 # =========================
 # Logging Setup
 # =========================
-logger = logging.getLogger("websockets")
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler())
+# logger = logging.getLogger("websockets")
+# logger.setLevel(logging.DEBUG)
+# logger.addHandler(logging.StreamHandler())
 
 # =========================
 # Base Reconstruction Model

@@ -131,6 +131,7 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
             # Wait for a fragment from any client
             fragment: bytes = await queue.get()
             await websocket.send_bytes(fragment)
+            print(f"Sent fragment from queue to model [{model_name}]")
 
             # Wait for the model's result
             result_bytes: bytes = await websocket.receive_bytes()
@@ -153,4 +154,4 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 # Run the FastAPI app
 # =========================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", ws_max_size=None, port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

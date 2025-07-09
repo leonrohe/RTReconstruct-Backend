@@ -44,7 +44,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
         try:
             neucon_fragment = self.base_fragment_to_neucon_fragment(fragment)
 
-            scene_name = "test_scene"
+            scene_name = fragment['scene_name']
             fragment_name = f"{scene_name}_{self.fragmentIndex}"
             item = {
                 'imgs': neucon_fragment["images"],
@@ -81,7 +81,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
 
                 mesh = SaveScene.tsdf2mesh(cfg.MODEL.VOXEL_SIZE, origin, tsdf)
                 glb_bytes = mesh.export(file_type='glb')
-                result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, False)
+                result: ModelResult = ModelResult(scene_name, glb_bytes, False)
 
                 await self.send_result(result)
         except Exception as e:

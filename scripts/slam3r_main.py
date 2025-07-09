@@ -66,8 +66,12 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                             self.i2p_model,
                             self.l2w_model,
                             str(tmp_img_dir))
+                            
         result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, True) 
-        
+        result.SetTranslation(0.09, 0.111, -0.463)
+        result.SetRotation(35.685, -4.701, -2.377, 1)
+        result.SetScale(2, 2, 2)
+
         await self.send_result(result)
 
     def recon_scene_batched(self,

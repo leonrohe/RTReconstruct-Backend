@@ -64,7 +64,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
     if client_scene in model_outputs:
         print(f"Sending model outputs for scene: {client_scene} to client: {client_id}")
         for model_name, result in model_outputs[client_scene].items():
-            await websocket.send_bytes(result.output)
+            await websocket.send_bytes(result.Serialize())
     else:
         print(f"No model outputs available for scene: {client_scene}")
 
@@ -79,7 +79,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 if client_id in scene_clients.get(client_scene, set()):
                     for model_name, model_result in model_outputs.get(client_scene, {}).items():
                         print(f"Sending model output for scene: {client_scene}, model: {model_name} to client: {client_id}")
-                        await websocket.send_bytes(model_result.output)
+                        await websocket.send_bytes(model_result.Serialize())
         except Exception as e:
             print(f"Send task error for client {client_id}: {e}")
 

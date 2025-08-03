@@ -2,7 +2,7 @@ import asyncio
 import json
 import websockets
 from abc import ABC, abstractmethod
-from scripts import myutils
+from utils import myutils
 
 import logging
 

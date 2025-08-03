@@ -1,6 +1,6 @@
 import asyncio
 import json
-from scripts import myutils
+from utils import myutils
 from typing import Dict, List, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect

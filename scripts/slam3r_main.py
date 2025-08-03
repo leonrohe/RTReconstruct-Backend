@@ -2,7 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import torch
-from myutils import ModelResult
+from utils.myutils import ModelResult
 import numpy as np
 
 from models.base_model import BaseReconstructionModel
@@ -69,7 +69,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                             
         result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, True) 
         result.SetTranslation(0.09, 0.111, -0.463)
-        result.SetRotation(35.685, -4.701, -2.377, 1)
+        result.SetRotation(35.685, -4.701, -2.377, degrees=True)
         result.SetScale(2, 2, 2)
 
         await self.send_result(result)

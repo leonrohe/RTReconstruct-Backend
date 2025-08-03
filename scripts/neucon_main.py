@@ -10,7 +10,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data._utils.collate import default_collate
-from myutils import ModelResult
+from utils.myutils import ModelResult
 from models.NeuralRecon.datasets import transforms
 from models.NeuralRecon.models.neuralrecon import NeuralRecon
 from models.base_model import BaseReconstructionModel

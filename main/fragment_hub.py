@@ -1,6 +1,8 @@
 import asyncio
 import json
 from utils import myutils
+from db.base_db_handler import DBHandler
+from db.sqlite_db_handler import SQLiteDBHandler
 from typing import Dict, List, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -11,7 +13,7 @@ import uvicorn
 # =========================
 
 # Start FastAPI app
-app = FastAPI()
+app: FastAPI = FastAPI()
 
 # --- Global State ---
 # Maps client id to websocket connection
@@ -127,29 +129,31 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     print(f"Model [{model_name}] connected")
 
     try:
-        while True:
-            # Wait for a fragment from any client
-            fragment: bytes = await queue.get()
-            await websocket.send_bytes(fragment)
-            print(f"Sent fragment from queue to model [{model_name}]")
+        with SQLiteDBHandler("db/results.db") as dbhandler:
+            while True:
+                # Wait for a fragment from any client
+                fragment: bytes = await queue.get()
+                await websocket.send_bytes(fragment)
+                print(f"Sent fragment from queue to model [{model_name}]")
 
-            # Wait for the model's result
-            result_bytes: bytes = await websocket.receive_bytes()
+                # Wait for the model's result
+                result_bytes: bytes = await websocket.receive_bytes()
 
-            if(result_bytes == b''):
-                print(f"Model [{model_name}] sent no result. Continuing to next fragment.")
-                continue
+                if(result_bytes == b''):
+                    print(f"Model [{model_name}] sent no result. Continuing to next fragment.")
+                    continue
 
-            result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
-            print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
+                result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
+                print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
 
-            # Store the result by scene and model
-            model_outputs.setdefault(result.scene_name, {})[model_name] = result
+                # Store the result by scene and model
+                model_outputs.setdefault(result.scene_name, {})[model_name] = result
+                dbhandler.insert_result(result)
 
-            # Notify all clients interested in this scene
-            for client_id in scene_clients.get(result.scene_name, set()):
-                if client_id in client_events:
-                    client_events[client_id].set()
+                # Notify all clients interested in this scene
+                for client_id in scene_clients.get(result.scene_name, set()):
+                    if client_id in client_events:
+                        client_events[client_id].set()
     except WebSocketDisconnect as e:
         print(f"Model {model_name} disconnected, because: {e}")
     finally:

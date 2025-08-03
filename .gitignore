@@ -38,6 +38,9 @@ htmlcov/
 *.pid
 *.sock
 
+# SQLITE
+*.db
+
 # Build
 build/
 dist/

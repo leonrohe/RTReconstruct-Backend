@@ -41,6 +41,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
     async def handle_fragment(self, fragment: dict):
         global MODEL, TRANSFORMS
 
+        # Fragment processing
         try:
             neucon_fragment = self.base_fragment_to_neucon_fragment(fragment)
 
@@ -61,9 +62,9 @@ class NeuConReconstructionModel(BaseReconstructionModel):
         except Exception as e:
             print("Error during fragment processing:", e)
             print(traceback.format_exc())
-            await self.send_result(json.dumps({"error": f"Failed to load and process fragment.pkl.\nError: {e}"}))
             return
 
+        # Inference
         try:
             with torch.no_grad():
                 outputs, _ = MODEL(item, True)
@@ -71,9 +72,12 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 print("Inference complete.")
 
                 if outputs == {}:
-                    print("No output from the model.")
-                    await self.send_result(json.dumps({"error": "No output from the model."}))
-                    return   
+                    print("No output from the model. Resetting ...")
+                    MODEL = NeuralRecon(cfg).cuda().eval()
+                    MODEL = torch.nn.DataParallel(MODEL, device_ids=[0])
+                    MODEL.load_state_dict(STATE_DICT['model'], strict=False)
+                    print("Model reset complete.")
+                    await self.send_result(None)
 
                 tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
                 origin = outputs['origin'][0].data.cpu().numpy()
@@ -82,12 +86,13 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 mesh = SaveScene.tsdf2mesh(cfg.MODEL.VOXEL_SIZE, origin, tsdf)
                 glb_bytes = mesh.export(file_type='glb')
                 result: ModelResult = ModelResult(scene_name, glb_bytes, False)
+                # result.SetTranslation(0, -2, 0)
+                result.SetRotation(90, 0, 180, degrees=True)
 
                 await self.send_result(result)
         except Exception as e:
             print("Error during inference:", e)
             print(traceback.format_exc())
-            await self.send_result(json.dumps({"error": f"Failed to run inference.\nError: {e}\nTraceback: {traceback.format_exc()}"}))
             return
     
     def base_fragment_to_neucon_fragment(self, fragment: dict) -> dict:

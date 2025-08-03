@@ -66,6 +66,11 @@ class BaseReconstructionModel(ABC):
         """
         try:
             print("Sending result to server...")
+            if(result is None):
+                print("No result to send. Sending empty result.")
+                await self.ws.send(b'')
+                return
+
             result_bytes = result.Serialize()
             await self.ws.send(result_bytes)
             print(f"[{self.model_name}] Sent {len(result_bytes)} bytes")

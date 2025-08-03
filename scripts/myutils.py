@@ -1,8 +1,9 @@
 import io
+import math
 import struct
 
 from PIL import Image
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -22,8 +23,16 @@ class ModelResult():
     def SetTranslation(self, x: float, y: float, z: float):
         self.transform = (x, y, z)
 
-    def SetRotation(self, x: float, y: float, z: float, w: float):
-        self.rotation = (x, y, z, w)
+    def SetRotation(self, roll: float, pitch: float, yaw: float, degrees: bool = False):
+        """
+        Set rotation from Euler angles. If degrees=True, input is interpreted as degrees.
+        Order: roll (around X), pitch (around Y), yaw (around Z).
+        """
+        if degrees:
+            roll = math.radians(roll)
+            pitch = math.radians(pitch)
+            yaw = math.radians(yaw)
+        self.rotation = euler_to_quaternion(roll, pitch, yaw)
 
     def SetScale(self, sx: float, sy: float, sz: float):
         self.scale = (sx, sy, sz)
@@ -54,6 +63,36 @@ class ModelResult():
         # Concatenate all parts
         result = header + is_pointcloud_byte + transform_bytes + rotation_bytes + scale_bytes + self.output
         return result
+
+def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Tuple[float, float, float, float]:
+    """
+    Convert Euler angles to quaternion.
+    Angles are assumed to be in radians.
+    Rotation order is roll (X), pitch (Y), yaw (Z) — i.e., intrinsic rotations about X, then Y, then Z.
+    Returns quaternion as (x, y, z, w).
+    """
+    half_roll = roll * 0.5
+    half_pitch = pitch * 0.5
+    half_yaw = yaw * 0.5
+
+    cr = math.cos(half_roll)
+    sr = math.sin(half_roll)
+    cp = math.cos(half_pitch)
+    sp = math.sin(half_pitch)
+    cy = math.cos(half_yaw)
+    sy = math.sin(half_yaw)
+
+    # Quaternion composition for roll (x), pitch (y), yaw (z):
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+
+    # Normalize to guard against drift
+    norm = math.sqrt(x * x + y * y + z * z + w * w)
+    if norm == 0:
+        return (0.0, 0.0, 0.0, 1.0)
+    return (x / norm, y / norm, z / norm, w / norm)
 
 def DeserializeFragment(data: bytes) -> Dict[str, Any]:
     mv = memoryview(data)
@@ -222,7 +261,7 @@ def DeserializeResult(data: bytes) -> ModelResult:
 
     result: ModelResult = ModelResult(scene_name, output, is_pointcloud)
     result.SetTranslation(*transform)
-    result.SetRotation(*rotation)
+    result.rotation = rotation
     result.SetScale(*scale)
 
     return result

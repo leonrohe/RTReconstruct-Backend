@@ -135,6 +135,11 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 
             # Wait for the model's result
             result_bytes: bytes = await websocket.receive_bytes()
+
+            if(result_bytes == b''):
+                print(f"Model [{model_name}] sent no result. Continuing to next fragment.")
+                continue
+
             result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
             print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
 

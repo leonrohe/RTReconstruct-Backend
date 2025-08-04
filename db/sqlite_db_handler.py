@@ -15,6 +15,7 @@ class SQLiteDBHandler(DBHandler):
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS model_results (
                 scene_name  TEXT,
+                model_name  TEXT,
                 created_at  INTEGER,
                 glb         BLOB,
                 pointcloud  BOOLEAN,
@@ -28,7 +29,7 @@ class SQLiteDBHandler(DBHandler):
                 rotation_y  REAL,
                 rotation_z  REAL,
                 rotation_w  REAL,
-                PriMARY KEY (scene_name, created_at)
+                PRIMARY KEY (scene_name, model_name)
             )
         """)
         self.conn.commit()
@@ -38,7 +39,7 @@ class SQLiteDBHandler(DBHandler):
             self.conn.close()
             self.conn = None
 
-    def insert_result(self, result: ModelResult):
+    def insert_result(self, model_name: str, result: ModelResult):
         if not self.conn:
             raise RuntimeError("Database is not connected")
 
@@ -48,6 +49,7 @@ class SQLiteDBHandler(DBHandler):
             """
             INSERT OR REPLACE INTO model_results (
                 scene_name,
+                model_name,
                 created_at,
                 glb,
                 pointcloud,
@@ -61,13 +63,14 @@ class SQLiteDBHandler(DBHandler):
                 rotation_y,
                 rotation_z,
                 rotation_w
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 result.scene_name,
+                model_name,
                 created_at,
                 result.output,
-                1 if result.is_pointcloud else 0,
+                result.is_pointcloud,
                 result.transform[0],
                 result.transform[1],
                 result.transform[2],

@@ -148,7 +148,10 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 
                 # Store the result by scene and model
                 model_outputs.setdefault(result.scene_name, {})[model_name] = result
-                dbhandler.insert_result(result)
+
+                # Store the result in the database
+                dbhandler.insert_result(model_name, result)
+                print(f"Inserted result for scene: {result.scene_name}, model: {model_name} into database")
 
                 # Notify all clients interested in this scene
                 for client_id in scene_clients.get(result.scene_name, set()):

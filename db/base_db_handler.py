@@ -24,7 +24,7 @@ class DBHandler(ABC):
         pass
 
     @abstractmethod
-    def insert_result(self, result: ModelResult):
+    def insert_result(self, model_name: str, result: ModelResult):
         """
         Insert a model result into the database.
         This method should be implemented by subclasses to handle the insertion logic.

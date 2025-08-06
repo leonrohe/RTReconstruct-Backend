@@ -139,7 +139,8 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                 # Wait for the model's result
                 result_bytes: bytes = await websocket.receive_bytes()
 
-                if(result_bytes == b''):
+                # 0 for failure, 1 for successful but unimportant result
+                if(result_bytes == b'0' or result_bytes == b'1'):
                     print(f"Model [{model_name}] sent no result. Continuing to next fragment.")
                     continue
 

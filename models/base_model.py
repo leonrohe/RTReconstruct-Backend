@@ -57,7 +57,7 @@ class BaseReconstructionModel(ABC):
             fragment = myutils.DeserializeFragment(message)
             asyncio.create_task(self.handle_fragment(fragment))
 
-    async def send_result(self, result: myutils.ModelResult):
+    async def send_result(self, result: myutils.ModelResult, success: bool = True):
         """
         Sends the processed result back to the server.
 
@@ -66,11 +66,20 @@ class BaseReconstructionModel(ABC):
         """
         try:
             print("Sending result to server...")
-            if(result is None):
-                print("No result to send. Sending empty result.")
-                await self.ws.send(b'')
+            
+            # If reconstruction failed, send 0 byte
+            if not success:
+                print("Failed to get result from model. Sendung 0 byte.")
+                await self.ws.send(b'0')
+                return
+            
+            # If reconstruction was successful, but result was unimportant
+            if result is None:
+                print("Result empty, but operation was successful. Sending 1 byte.")
+                await self.ws.send(b'1')
                 return
 
+            # If successful, and result is important
             result_bytes = result.Serialize()
             await self.ws.send(result_bytes)
             print(f"[{self.model_name}] Sent {len(result_bytes)} bytes")

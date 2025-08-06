@@ -72,12 +72,12 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 print("Inference complete.")
 
                 if outputs == {}:
-                    print("No output from the model. Resetting ...")
-                    MODEL = NeuralRecon(cfg).cuda().eval()
-                    MODEL = torch.nn.DataParallel(MODEL, device_ids=[0])
-                    MODEL.load_state_dict(STATE_DICT['model'], strict=False)
-                    print("Model reset complete.")
-                    await self.send_result(None)
+                    # print("No output from the model. Resetting ...")
+                    # MODEL = NeuralRecon(cfg).cuda().eval()
+                    # MODEL = torch.nn.DataParallel(MODEL, device_ids=[0])
+                    # MODEL.load_state_dict(STATE_DICT['model'], strict=False)
+                    # print("Model reset complete.")
+                    await self.send_result(None, False)
 
                 tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
                 origin = outputs['origin'][0].data.cpu().numpy()

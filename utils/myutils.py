@@ -20,10 +20,13 @@ class ModelResult():
         self.scale = (1.0, 1.0, 1.0)            # Scale (sx, sy, sz)
         self.rotation = (0.0, 0.0, 0.0, 1.0)    # Quaternion (x, y, z, w)
 
+    def SetGLB(self, glb_data: bytes):
+        self.output = glb_data
+
     def SetTranslation(self, x: float, y: float, z: float):
         self.transform = (x, y, z)
 
-    def SetRotation(self, roll: float, pitch: float, yaw: float, degrees: bool = False):
+    def SetRotationFromEuler(self, roll: float, pitch: float, yaw: float, degrees: bool = False):
         """
         Set rotation from Euler angles. If degrees=True, input is interpreted as degrees.
         Order: roll (around X), pitch (around Y), yaw (around Z).
@@ -33,6 +36,9 @@ class ModelResult():
             pitch = math.radians(pitch)
             yaw = math.radians(yaw)
         self.rotation = euler_to_quaternion(roll, pitch, yaw)
+
+    def SetRotationFromQuaternion(self, x: float, y: float, z: float, w: float):
+        self.rotation = (x, y, z, w)
 
     def SetScale(self, sx: float, sy: float, sz: float):
         self.scale = (sx, sy, sz)
@@ -265,3 +271,66 @@ def DeserializeResult(data: bytes) -> ModelResult:
     result.SetScale(*scale)
 
     return result
+
+# 0:4 : magic, 4:8 : version, 
+def DeserializeTransformFragment(data: bytes) -> Dict[str, Any]:
+    """
+    Deserialize a translation fragment from bytes.
+    This function assumes the data is in the format defined by the translation protocol.
+    """
+    mv = memoryview(data)
+    offset = 0
+
+    def read_bytes(length: int) -> bytes:
+        nonlocal offset
+        val = mv[offset:offset+length]
+        offset += length
+        return val.tobytes()
+
+    def read_uint32() -> int:
+        nonlocal offset
+        val = struct.unpack_from('<I', mv, offset)[0]
+        offset += 4
+        return val
+    
+    def read_float() -> float:
+        nonlocal offset
+        val = struct.unpack_from('<f', mv, offset)[0]
+        offset += 4
+        return val
+
+    # Read magic bytes
+    magic = read_bytes(4)
+    assert magic == b'LEON', f"Invalid magic bytes: {magic}"
+
+    # Read version
+    version = read_uint32()
+    assert version == 2, f"Unsupported version: {version}"
+
+    # Translation
+    translation = (
+        read_float(),  # x
+        read_float(),  # y
+        read_float()   # z
+    )
+
+    # Rotation (quaternion)
+    rotation = (
+        read_float(),  # x
+        read_float(),  # y
+        read_float(),  # z
+        read_float()   # w
+    )
+
+    # Scale
+    scale = (
+        read_float(),  # sx
+        read_float(),  # sy
+        read_float()   # sz
+    )
+
+    return {
+        'translation': translation,
+        'rotation': rotation,
+        'scale': scale
+    }

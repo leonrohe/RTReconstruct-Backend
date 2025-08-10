@@ -3,7 +3,7 @@ import json
 from utils import myutils
 from db.base_db_handler import DBHandler
 from db.sqlite_db_handler import SQLiteDBHandler
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
@@ -90,20 +90,40 @@ async def websocket_client_endpoint(websocket: WebSocket):
     # --- Main receive loop: handle incoming data from the client ---
     try:
         while True:
-            data = await websocket.receive_bytes()
-            # Parse model name from the binary protocol
             # 0:4 : magic, 4:8 : version, 8:12 : window size
-            model_name_length = int.from_bytes(data[12:12 + 4], 'little')
-            model_name = data[16:16 + model_name_length].decode('utf-8')
-            scene_name_length = int.from_bytes(data[16 + model_name_length:16 + model_name_length + 4], 'little')
-            scene_name = data[20 + model_name_length:20 + model_name_length + scene_name_length].decode('utf-8')
-            print(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
+            data = await websocket.receive_bytes()
+            (magic, version) = data[0:4], int.from_bytes(data[4:8], 'little')
 
-            if model_name in model_inputs:
-                await model_inputs[model_name].put(data)
-            else:
-                print(f"Model {model_name} not found, sending error to client")
-                await websocket.send_text(json.dumps({"error": f"No model with name '{model_name}' found"}))
+            if(magic != b'LEON'):
+                print(f"Received invalid data from client {client_id}, expected LEON magic bytes")
+                continue
+        
+            if(version == 1): # Fragment request
+                model_name_length = int.from_bytes(data[12:12 + 4], 'little')
+                model_name = data[16:16 + model_name_length].decode('utf-8')
+                scene_name_length = int.from_bytes(data[16 + model_name_length:16 + model_name_length + 4], 'little')
+                scene_name = data[20 + model_name_length:20 + model_name_length + scene_name_length].decode('utf-8')
+                print(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
+
+                if model_name in model_inputs:
+                    await model_inputs[model_name].put(data)
+                else:
+                    print(f"Model {model_name} not found, sending error to client")
+                    await websocket.send_text(json.dumps({"error": f"No model with name '{model_name}' found"}))
+            
+            elif(version == 2): # Translate request
+                transform_request: Dict[str, Any] = myutils.DeserializeTransformFragment(data)
+                print(f"Received Translation data: {transform_request} from client: {client_id}")
+
+                for _, result in model_outputs[client_scene].items():
+                    result.SetTranslation(*transform_request['translation'])
+                    result.SetRotationFromQuaternion(*transform_request['rotation'])
+                    result.SetScale(*transform_request['scale'])
+
+                # Notify all clients interested in this scene
+                for client_id in scene_clients.get(client_scene, set()):
+                    if client_id in client_events:
+                        client_events[client_id].set()
     except WebSocketDisconnect:
         print(f"Client disconnected: {client_id}")
         del connected_clients[client_id]
@@ -148,8 +168,12 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                 print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
 
                 # Store the result by scene and model
-                model_outputs.setdefault(result.scene_name, {})[model_name] = result
-
+                scene = model_outputs.setdefault(result.scene_name, {})
+                if model_name not in scene:
+                    scene[model_name] = result
+                else:
+                    scene[model_name].SetGLB(result.output)
+                
                 # Store the result in the database
                 dbhandler.insert_result(model_name, result)
                 print(f"Inserted result for scene: {result.scene_name}, model: {model_name} into database")

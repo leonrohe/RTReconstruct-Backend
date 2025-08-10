@@ -72,12 +72,12 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 print("Inference complete.")
 
                 if outputs == {}:
-                    # print("No output from the model. Resetting ...")
-                    # MODEL = NeuralRecon(cfg).cuda().eval()
-                    # MODEL = torch.nn.DataParallel(MODEL, device_ids=[0])
-                    # MODEL.load_state_dict(STATE_DICT['model'], strict=False)
-                    # print("Model reset complete.")
+                    print("[ERROR] No output from the model. Resetting ...")
+                    MODEL = NeuralRecon(cfg).cuda().eval()
+                    MODEL = torch.nn.DataParallel(MODEL, device_ids=[0])
+                    MODEL.load_state_dict(STATE_DICT['model'], strict=False)
                     await self.send_result(None, False)
+                    return
 
                 tsdf = outputs['scene_tsdf'][0].data.cpu().numpy()
                 origin = outputs['origin'][0].data.cpu().numpy()
@@ -87,7 +87,7 @@ class NeuConReconstructionModel(BaseReconstructionModel):
                 glb_bytes = mesh.export(file_type='glb')
                 result: ModelResult = ModelResult(scene_name, glb_bytes, False)
                 # result.SetTranslation(0, -2, 0)
-                result.SetRotation(90, 0, 180, degrees=True)
+                result.SetRotationFromEuler(90, 0, 180, degrees=True)
 
                 await self.send_result(result)
         except Exception as e:

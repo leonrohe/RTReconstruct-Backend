@@ -307,6 +307,9 @@ def DeserializeTransformFragment(data: bytes) -> Dict[str, Any]:
     version = read_uint32()
     assert version == 2, f"Unsupported version: {version}"
 
+    scene_name_length = read_uint32()
+    scene_name = read_bytes(scene_name_length).decode('utf-8')
+
     # Translation
     translation = (
         read_float(),  # x
@@ -330,6 +333,7 @@ def DeserializeTransformFragment(data: bytes) -> Dict[str, Any]:
     )
 
     return {
+        'name': scene_name,
         'translation': translation,
         'rotation': rotation,
         'scale': scale

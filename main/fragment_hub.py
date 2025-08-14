@@ -115,13 +115,18 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 transform_request: Dict[str, Any] = myutils.DeserializeTransformFragment(data)
                 print(f"Received Translation data: {transform_request} from client: {client_id}")
 
-                for _, result in model_outputs[client_scene].items():
+                scene_name = transform_request['name']
+                if(scene_name not in model_outputs):
+                    print(f"No scene named '{scene_name}' found in model outputs. Ignoring transform request.")
+                    continue
+
+                for _, result in model_outputs[scene_name].items():
                     result.SetTranslation(*transform_request['translation'])
                     result.SetRotationFromQuaternion(*transform_request['rotation'])
                     result.SetScale(*transform_request['scale'])
 
                 # Notify all clients interested in this scene
-                for client_id in scene_clients.get(client_scene, set()):
+                for client_id in scene_clients.get(scene_name, set()):
                     if client_id in client_events:
                         client_events[client_id].set()
     except WebSocketDisconnect:

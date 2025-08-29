@@ -14,21 +14,30 @@ import torch.multiprocessing as mp
 import tqdm
 import yaml
 
-import models.MAST3R.mast3r_slam.evaluate as eval
-from utils.myutils import ModelResult
-from models.MAST3R.mast3r_slam.config import config, load_config, set_global_config
-from models.MAST3R.mast3r_slam.dataloader import Intrinsics, load_dataset
-from models.MAST3R.mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
-from models.MAST3R.mast3r_slam.global_opt import FactorGraph
-from models.MAST3R.mast3r_slam.mast3r_utils import (
+from natsort import natsorted
+from utils.myutils import ModelResult, sample_n_points
+
+import models.MASt3R.mast3r_slam.evaluate as eval
+from models.MASt3R.mast3r_slam.config import config, load_config, set_global_config
+from models.MASt3R.mast3r_slam.dataloader import Intrinsics, MonocularDataset
+from models.MASt3R.mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
+from models.MASt3R.mast3r_slam.global_opt import FactorGraph
+from models.MASt3R.mast3r_slam.mast3r_utils import (
     load_mast3r,
     load_retriever,
     mast3r_inference_mono,
 )
-from models.MAST3R.mast3r_slam.multiprocess_utils import new_queue, try_get_msg
-from models.MAST3R.mast3r_slam.tracker import FrameTracker
-from models.MAST3R.mast3r_slam.visualization import WindowMsg, run_visualization
+from models.MASt3R.mast3r_slam.multiprocess_utils import new_queue, try_get_msg
+from models.MASt3R.mast3r_slam.tracker import FrameTracker
 from models.base_model import BaseReconstructionModel
+
+class JPEGFiles(MonocularDataset):
+    def __init__(self, dataset_path):
+        super().__init__()
+        self.use_calibration = False
+        self.dataset_path = pathlib.Path(dataset_path)
+        self.rgb_files = natsorted(list((self.dataset_path).glob("*.jpg")))
+        self.timestamps = np.arange(0, len(self.rgb_files)).astype(self.dtype) / 30.0
 
 class MAST3RReconstructionModel(BaseReconstructionModel):
     """
@@ -36,22 +45,17 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
     It is designed to handle reconstuction of fragments from a WebSocket connection.
     """
 
-    def __init__(self, model_name, server_url, mast3r_model, device: str = "cuda:0") -> None:
+    def __init__(self, model_name, server_url, mast3r_model, keyframes, states, tracker, device: str = "cuda:0") -> None:
         super().__init__(model_name, server_url)
-        
+        print("initializing recon model")
+
         self.frame_idx = 0
         self.device = device
-        self.mast3r_model = mast3r_model
-        self.manager = mp.Manager()
-        self.keyframes = SharedKeyframes(self.manager, -1, -1) #TODO Change hardcoded h, w
-        self.states = SharedStates(self.manager, -1, -1) #TODO Change hardcoded h, w
-        self.tracker = FrameTracker(self.mast3r_model, self.keyframes, self.device)
-        self.backend = mp.Process(
-            target=run_backend,
-            args=(config, self.mast3r_model, self.states, self.keyframes, None)
-        )
-        
-        self.backend.start()
+        self.model = mast3r_model
+        self.manager = manager
+        self.keyframes = keyframes
+        self.states = states
+        self.tracker = tracker
 
     async def handle_fragment(self, fragment: dict) -> None:
         tmp_img_dir = pathlib.Path("/tmp/tmp_images")
@@ -63,18 +67,18 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
             with open(img_path, 'wb') as f:
                 f.write(img_bytes)
         
-        glb_bytes: bytes = self.recon_scene_batched(str(tmp_img_dir))
+        glb: bytes = await self.recon_scene_batched(str(tmp_img_dir))
 
-        result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, True)
+        result: ModelResult = ModelResult(fragment['scene_name'], glb, True)
         await self.send_result(result)
 
-    def recon_scene_batched(self, img_dir: str) -> bytes:
-        dataset = load_dataset(img_dir)
+    async def recon_scene_batched(self, img_dir: str) -> bytes:
+        dataset = JPEGFiles(img_dir)
         
-        for _ in range(len(dataset)):
+        for i in range(len(dataset)):
             mode = self.states.get_mode()
 
-            _, img = dataset[self.frame_idx]
+            _, img = dataset[i]
             T_WC = (
                 lietorch.Sim3.Identity(1, device=self.device)
                 if self.frame_idx == 0
@@ -84,7 +88,7 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
 
             if mode == Mode.INIT:
                 # Initialize via mono inference, and encoded features neeed for database
-                X_init, C_init = mast3r_inference_mono(model, frame)
+                X_init, C_init = mast3r_inference_mono(self.model, frame)
                 frame.update_pointmap(X_init, C_init)
                 self.keyframes.append(frame)
                 self.states.queue_global_optimization(len(self.keyframes) - 1)
@@ -92,41 +96,33 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
                 self.states.set_frame(frame)
                 self.frame_idx += 1
                 continue
+
             if mode == Mode.TRACKING:
                 add_new_kf, match_info, try_reloc = self.tracker.track(frame)
                 if try_reloc:
                     self.states.set_mode(Mode.RELOC)
                 self.states.set_frame(frame)
+
             elif mode == Mode.RELOC:
-                X, C = mast3r_inference_mono(model, frame)
+                X, C = mast3r_inference_mono(self.model, frame)
                 frame.update_pointmap(X, C)
                 self.states.set_frame(frame)
                 self.states.queue_reloc()
-                # In single threaded mode, make sure relocalization happen for every frame
-                while config["single_thread"]:
-                    with self.states.lock:
-                        if self.states.reloc_sem.value == 0:
-                            break
-                    time.sleep(0.01)
             else:
                 raise Exception("Invalid mode")
             
             if add_new_kf:
                 self.keyframes.append(frame)
                 self.states.queue_global_optimization(len(self.keyframes) - 1)
-                # In single threaded mode, wait for the backend to finish
-                while config["single_thread"]:
-                    with self.states.lock:
-                        if len(self.states.global_optimizer_tasks) == 0:
-                            break
-                    time.sleep(0.01)         
+
+            run_backend(states, keyframes)
             self.frame_idx += 1
 
-        glb_bytes: bytes = self.construct_glb(self.keyframes)
-        return glb_bytes
+        glb: bytes = self.recon_pcd_as_glb(self.keyframes)
+        return glb
 
-    def construct_glb(self, keyframes, conf_threshold: float) -> bytes:
-        # Get Pcds and Colors from keyframe
+    def recon_pcd_as_glb(self, keyframes: list, conf_threshold: float = 0.05, num_points: int = 100000) -> bytes:
+        # Get Pcds and Colors from keyframes
         pcd_list, color_list = [], []
         for i in range(len(keyframes)):
             keyframe = keyframes[i]
@@ -142,11 +138,13 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
         colors = np.concatenate(color_list, axis=0)
 
         # Construct glb from Pcds and Colors
+        sampled_pcds, sampled_rgbs = sample_n_points(pointclouds, colors)
+
         scene = trimesh.Scene()
-        scene.add_geometry(trimesh.PointCloud(vertices=pointclouds, colors=colors/255.))
+        scene.add_geometry(trimesh.PointCloud(vertices=sampled_pcds, colors=sampled_rgbs/255.))
+        scene_glb = scene.export(file_type='glb')
 
-        return scene.export(file_type='glb')    
-
+        return scene_glb 
 
 def relocalization(frame, keyframes, factor_graph, retrieval_database):
     # we are adding and then removing from the keyframe, so we need to be careful.
@@ -193,76 +191,66 @@ def relocalization(frame, keyframes, factor_graph, retrieval_database):
                 factor_graph.solve_GN_rays()
         return successful_loop_closure
 
-def run_backend(cfg, model, states, keyframes, K):
-    set_global_config(cfg)
-
-    device = keyframes.device
-    factor_graph = FactorGraph(model, keyframes, K, device)
-    retrieval_database = load_retriever(model)
-
+def run_backend(states, keyframes):
     mode = states.get_mode()
-    while mode is not Mode.TERMINATED:
-        mode = states.get_mode()
-        if mode == Mode.INIT or states.is_paused():
-            time.sleep(0.01)
-            continue
-        if mode == Mode.RELOC:
-            frame = states.get_frame()
-            success = relocalization(frame, keyframes, factor_graph, retrieval_database)
-            if success:
-                states.set_mode(Mode.TRACKING)
-            states.dequeue_reloc()
-            continue
-        idx = -1
-        with states.lock:
-            if len(states.global_optimizer_tasks) > 0:
-                idx = states.global_optimizer_tasks[0]
-        if idx == -1:
-            time.sleep(0.01)
-            continue
+    if mode == Mode.INIT or states.is_paused():
+        return
+    if mode == Mode.RELOC:
+        frame = states.get_frame()
+        success = relocalization(frame, keyframes, factor_graph, retrieval_database)
+        if success:
+            states.set_mode(Mode.TRACKING)
+        states.dequeue_reloc()
+        return
+    idx = -1
+    with states.lock:
+        if len(states.global_optimizer_tasks) > 0:
+            idx = states.global_optimizer_tasks[0]
+    if idx == -1:
+        return
+    # Graph Construction
+    kf_idx = []
+    # k to previous consecutive keyframes
+    n_consec = 1
+    for j in range(min(n_consec, idx)):
+        kf_idx.append(idx - 1 - j)
+    frame = keyframes[idx]
+    retrieval_inds = retrieval_database.update(
+        frame,
+        add_after_query=True,
+        k=config["retrieval"]["k"],
+        min_thresh=config["retrieval"]["min_thresh"],
+    )
+    kf_idx += retrieval_inds
 
-        # Graph Construction
-        kf_idx = []
-        # k to previous consecutive keyframes
-        n_consec = 1
-        for j in range(min(n_consec, idx)):
-            kf_idx.append(idx - 1 - j)
-        frame = keyframes[idx]
-        retrieval_inds = retrieval_database.update(
-            frame,
-            add_after_query=True,
-            k=config["retrieval"]["k"],
-            min_thresh=config["retrieval"]["min_thresh"],
+    lc_inds = set(retrieval_inds)
+    lc_inds.discard(idx - 1)
+    if len(lc_inds) > 0:
+        print("Database retrieval", idx, ": ", lc_inds)
+
+    kf_idx = set(kf_idx)  # Remove duplicates by using set
+    kf_idx.discard(idx)  # Remove current kf idx if included
+    kf_idx = list(kf_idx)  # convert to list
+    frame_idx = [idx] * len(kf_idx)
+    if kf_idx:
+        factor_graph.add_factors(
+            kf_idx, frame_idx, config["local_opt"]["min_match_frac"]
         )
-        kf_idx += retrieval_inds
 
-        lc_inds = set(retrieval_inds)
-        lc_inds.discard(idx - 1)
-        if len(lc_inds) > 0:
-            print("Database retrieval", idx, ": ", lc_inds)
+    with states.lock:
+        states.edges_ii[:] = factor_graph.ii.cpu().tolist()
+        states.edges_jj[:] = factor_graph.jj.cpu().tolist()
 
-        kf_idx = set(kf_idx)  # Remove duplicates by using set
-        kf_idx.discard(idx)  # Remove current kf idx if included
-        kf_idx = list(kf_idx)  # convert to list
-        frame_idx = [idx] * len(kf_idx)
-        if kf_idx:
-            factor_graph.add_factors(
-                kf_idx, frame_idx, config["local_opt"]["min_match_frac"]
-            )
+    if config["use_calib"]:
+        factor_graph.solve_GN_calib()
+    else:
+        factor_graph.solve_GN_rays()
 
-        with states.lock:
-            states.edges_ii[:] = factor_graph.ii.cpu().tolist()
-            states.edges_jj[:] = factor_graph.jj.cpu().tolist()
+    with states.lock:
+        if len(states.global_optimizer_tasks) > 0:
+            idx = states.global_optimizer_tasks.pop(0)
 
-        if config["use_calib"]:
-            factor_graph.solve_GN_calib()
-        else:
-            factor_graph.solve_GN_rays()
-
-        with states.lock:
-            if len(states.global_optimizer_tasks) > 0:
-                idx = states.global_optimizer_tasks.pop(0)
-
+W, H = 512, 384 # Width, Height of image for tensors
 MODEL_NAME = os.getenv("MODEL_NAME", "mast3r")
 SERVER_URL = os.getenv("SERVER_URL", "ws://router:5000/ws/model")
 if __name__ == "__main__":
@@ -273,13 +261,22 @@ if __name__ == "__main__":
     save_frames = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config/base.yaml")
+    parser.add_argument("--config", default="/app/configs/mast3r.yaml")
     args = parser.parse_args()
 
     load_config(args.config)
     
-    mast3r_model = load_mast3r()
+    manager = mp.Manager()
+    keyframes = SharedKeyframes(manager, H, W)
+    states = SharedStates(manager, H, W)
+
+    mast3r_model = load_mast3r("/app/models/MASt3R/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth", device=device)
     mast3r_model.share_memory()
 
-    model = MAST3RReconstructionModel(MODEL_NAME, SERVER_URL, mast3r_model)
+    tracker = FrameTracker(mast3r_model, keyframes, device)
+
+    factor_graph = FactorGraph(mast3r_model, keyframes, states)
+    retrieval_database = load_retriever(mast3r_model, "/app/models/MASt3R/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth")
+    
+    model = MAST3RReconstructionModel(MODEL_NAME, SERVER_URL, mast3r_model, keyframes, states, tracker)
     asyncio.run(model.connect())

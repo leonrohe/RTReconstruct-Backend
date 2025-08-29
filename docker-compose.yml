@@ -55,3 +55,26 @@ services:
             - capabilities: [gpu]
 
     entrypoint: ["/app/docker_entrypoint.sh"]
+
+  mast3r:
+    build:
+      context: .
+      dockerfile: dockerfiles/mast3r.Dockerfile
+    environment:
+      - SERVER_URL=ws://router:5000/ws/model
+      - MODEL_NAME=mast3r
+    volumes:
+      - ./utils:/app/utils
+      - ./scripts:/app/scripts
+      - ./configs:/app/configs
+      - mast3r-envs:/opt/conda/envs
+    shm_size: "8gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    entrypoint: ["/app/models/MASt3R/docker_entrypoint.sh"]
+
+volumes:
+  mast3r-envs:

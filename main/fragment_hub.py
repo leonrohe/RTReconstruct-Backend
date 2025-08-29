@@ -55,6 +55,9 @@ async def websocket_client_endpoint(websocket: WebSocket):
         print(f"Error receiving handshake: {e}")
         await websocket.close(code=1008)
         return
+    
+    available_models: List[str] = list(model_inputs.keys())
+    await websocket.send_json(available_models)
 
     # Register client in global state
     connected_clients[client_id] = websocket
@@ -126,9 +129,9 @@ async def websocket_client_endpoint(websocket: WebSocket):
                     result.SetScale(*transform_request['scale'])
 
                 # Notify all clients interested in this scene
-                for client_id in scene_clients.get(scene_name, set()):
-                    if client_id in client_events:
-                        client_events[client_id].set()
+                for cid in scene_clients.get(scene_name, set()):
+                    if cid in client_events and cid != client_id:
+                        client_events[cid].set()
     except WebSocketDisconnect:
         print(f"Client disconnected: {client_id}")
         del connected_clients[client_id]

@@ -3,7 +3,7 @@ import math
 import struct
 
 from PIL import Image
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, List
 
 import numpy as np
 
@@ -69,6 +69,13 @@ class ModelResult():
         # Concatenate all parts
         result = header + is_pointcloud_byte + transform_bytes + rotation_bytes + scale_bytes + self.output
         return result
+
+def sample_n_points(pcds: List, rgbs: List, num_points: int = 100000) -> Tuple[List, List]:
+    indices = np.arange(len(pcds))
+    n_samples = min(num_points, len(indices))
+    print(f"resampling {n_samples} points from {len(indices)} points")
+    sampled_indices = np.random.choice(indices, n_samples, replace=False)
+    return (pcds[sampled_indices], rgbs[sampled_indices])
 
 def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Tuple[float, float, float, float]:
     """

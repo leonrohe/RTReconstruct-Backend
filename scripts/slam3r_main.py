@@ -297,7 +297,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
 
         glb_bytes = self.get_model_from_scene(per_frame_res=scene.per_frame_res, 
                                               save_dir="/tmp/tmp_results", 
-                                              num_points_save=500000, 
+                                              num_points_save=100_000, 
                                               conf_thres_res=conf_thres_l2w)
 
         scene.batch_idx += 1
@@ -306,7 +306,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
 
     def get_model_from_scene(self, 
                              per_frame_res, save_dir, 
-                             num_points_save=200000, 
+                             num_points_save=100_000, 
                              conf_thres_res=3, 
                              valid_masks=None):  
         # collect the registered point clouds and rgb colors

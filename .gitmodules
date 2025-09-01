@@ -7,3 +7,6 @@
 [submodule "models/MASt3R"]
 	path = models/MASt3R
 	url = https://github.com/leonrohe/MASt3R-SLAM.git
+[submodule "models/VisFusion"]
+	path = models/VisFusion
+	url = https://github.com/leonrohe/VisFusion.git

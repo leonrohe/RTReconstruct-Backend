@@ -2,7 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import torch
-from utils.myutils import ModelResult
+from common_utils.myutils import ModelResult
 import numpy as np
 
 from models.base_model import BaseReconstructionModel

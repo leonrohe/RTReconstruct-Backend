@@ -10,7 +10,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data._utils.collate import default_collate
-from utils.myutils import ModelResult
+from common_utils.myutils import ModelResult
 from models.NeuralRecon.datasets import transforms
 from models.NeuralRecon.models.neuralrecon import NeuralRecon
 from models.base_model import BaseReconstructionModel
@@ -40,6 +40,11 @@ class NeuConReconstructionModel(BaseReconstructionModel):
 
     async def handle_fragment(self, fragment: dict):
         global MODEL, TRANSFORMS
+
+        # save fragment for debugging
+        for i, jpeg in enumerate(fragment['images']):
+            with open(f"/tmp/{fragment['scene_name']}_frag{self.fragmentIndex}_img{i}.jpg", "wb") as f:
+                f.write(jpeg)
 
         # Fragment processing
         try:

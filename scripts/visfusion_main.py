@@ -5,7 +5,6 @@ import traceback
 from PIL import Image
 import io
 import torch
-from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 import numpy as np
 

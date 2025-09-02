@@ -15,7 +15,7 @@ import tqdm
 import yaml
 
 from natsort import natsorted
-from utils.myutils import ModelResult, sample_n_points
+from common_utils.myutils import ModelResult, sample_n_points
 
 import models.MASt3R.mast3r_slam.evaluate as eval
 from models.MASt3R.mast3r_slam.config import config, load_config, set_global_config

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from utils.myutils import ModelResult
+from common_utils.myutils import ModelResult
 
 class DBHandler(ABC):
     """

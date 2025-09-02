@@ -10,7 +10,7 @@ services:
       - "5000:5000"
     volumes:
       - ./main:/app/main
-      - ./utils:/app/utils
+      - ./common_utils:/app/common_utils
       - ./models:/app/models
       - ./db:/app/db
     entrypoint: ["uvicorn", "main.fragment_hub:app", "--host", "0.0.0.0", "--port", "5000"]
@@ -26,7 +26,7 @@ services:
       - MODEL_NAME=neucon
     volumes:
       - ./models:/app/models
-      - ./utils:/app/utils
+      - ./common_utils:/app/common_utils
       - ./scripts:/app/scripts
       - ./configs:/app/configs
     deploy:
@@ -37,6 +37,28 @@ services:
 
     entrypoint: ["/app/docker_entrypoint.sh"]
 
+  visfusion:
+    build:
+      context: .
+      dockerfile: dockerfiles/visfusion.Dockerfile
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - SERVER_URL=ws://router:5000/ws/model
+      - MODEL_NAME=visfusion
+    volumes:
+      - ./models:/app/recon_models
+      - ./common_utils:/app/common_utils
+      - ./scripts:/app/scripts
+      - ./configs:/app/configs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+    entrypoint: ["/app/recon_models/VisFusion/docker_entrypoint.sh"]
+
   slam3r:
     build:
       context: .
@@ -46,7 +68,7 @@ services:
       - MODEL_NAME=slam3r
     volumes:
       - ./models:/app/models
-      - ./utils:/app/utils
+      - ./common_utils:/app/common_utils
       - ./scripts:/app/scripts
     deploy:
       resources:
@@ -64,7 +86,7 @@ services:
       - SERVER_URL=ws://router:5000/ws/model
       - MODEL_NAME=mast3r
     volumes:
-      - ./utils:/app/utils
+      - ./common_utils:/app/common_utils
       - ./scripts:/app/scripts
       - ./configs:/app/configs
       - mast3r-envs:/opt/conda/envs

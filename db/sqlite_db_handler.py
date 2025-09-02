@@ -3,7 +3,7 @@ from .base_db_handler import DBHandler
 
 import sqlite3
 from datetime import datetime
-from utils.myutils import ModelResult
+from common_utils.myutils import ModelResult
 
 class SQLiteDBHandler(DBHandler):
     def __init__(self, db_path: str = "results.db"):

@@ -67,7 +67,7 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
             with open(img_path, 'wb') as f:
                 f.write(img_bytes)
         
-        glb: bytes = asyncio.to_thread(self.recon_scene_batched, str(tmp_img_dir))
+        glb: bytes = await asyncio.to_thread(self.recon_scene_batched, str(tmp_img_dir))
 
         result: ModelResult = ModelResult(fragment['scene_name'], glb, True)
         await self.send_result(result)

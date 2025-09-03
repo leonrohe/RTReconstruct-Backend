@@ -2,9 +2,8 @@ FROM leonrohe/cuda:10.2-devel-ubuntu18.04
 
 # --- Environment Setup ---
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PYOPENGL_PLATFORM=osmesa
 ENV PATH=/opt/conda/envs/neucon/bin:/opt/conda/bin:$PATH
-ENV CONDA_DEFAULT_ENV=neucon
+ENV PYOPENGL_PLATFORM=osmesa
 ENV MAX_JOBS=2
 ENV MAKEFLAGS="-j2"
 
@@ -25,6 +24,13 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh && \
     conda clean -ya
+
+# Accept Anaconda Terms of Service
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
+
+ENV CONDA_DEFAULT_ENV=neucon
 
 # --- Copy Conda Environment Files ---
 COPY models/NeuralRecon/requirements.txt /app/requirements.txt

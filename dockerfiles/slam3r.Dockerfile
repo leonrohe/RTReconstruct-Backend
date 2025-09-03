@@ -36,8 +36,8 @@ RUN pip install --upgrade pip && \
     pip install -r requirements_optional.txt && \
     pip install xformers==0.0.28.post2
 
-COPY models/SLAM3R/docker_entrypoint.sh /app/docker_entrypoint.sh
-RUN chmod +x /app/docker_entrypoint.sh
+# COPY models/SLAM3R/docker_entrypoint.sh /app/docker_entrypoint.sh
+# RUN chmod +x /app/docker_entrypoint.sh
 
 # # Compile RoPE CUDA kernels
 # RUN cd models/SLAM3R/slam3r/pos_embed/curope && \

@@ -75,8 +75,7 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-
-    entrypoint: ["/app/docker_entrypoint.sh"]
+    entrypoint: ["/app/models/SLAM3R/docker_entrypoint.sh"]
 
   mast3r:
     build:

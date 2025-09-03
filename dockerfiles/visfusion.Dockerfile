@@ -15,9 +15,8 @@ RUN apt-get update && apt-get install -y \
     libegl1-mesa libgl1-mesa-dev \
     libosmesa6-dev libglfw3 libglfw3-dev \
     libgles2-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-    python3-distutils \
-    libittnotify0 \     # <-- hier dazu
- && rm -rf /var/lib/apt/lists/*
+    python3-distutils && \
+    rm -rf /var/lib/apt/lists/*
 
 # --- Miniconda Installation ---
 RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \

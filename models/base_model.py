@@ -41,7 +41,7 @@ class BaseReconstructionModel(ABC):
         Establishes a WebSocket connection to the backend server and starts
         listening for fragments and processing them.
         """
-        async with websockets.connect(self.server_url, max_size=None, ping_timeout=300) as websocket:
+        async with websockets.connect(self.server_url, max_size=None, ping_interval=20, ping_timeout=300) as websocket:
             self.ws = websocket
             print(f"[{self.model_name}] Connected to server")
             # Run listen() and process_loop() concurrently

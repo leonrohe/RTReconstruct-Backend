@@ -61,11 +61,24 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                 f.write(img_bytes)
 
         # Call your processing function
-        (glb_bytes, _) = self.recon_scene_batched(
-                            scene,
-                            self.i2p_model,
-                            self.l2w_model,
-                            str(tmp_img_dir))
+        try:
+            glb_bytes, _ = await asyncio.to_thread(
+                self.recon_scene_batched,
+                scene,
+                self.i2p_model,
+                self.l2w_model,
+                str(tmp_img_dir)
+            )
+        except Exception as e:
+            print(f"[{self.model_name}] Reconstruction failed: {e}", flush=True)
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            # notify server with failure byte (0)
+            await self.send_result(None, success=False)
+            return
                             
         result: ModelResult = ModelResult(fragment['scene_name'], glb_bytes, True) 
         result.SetTranslation(0.09, 0.111, -0.463)

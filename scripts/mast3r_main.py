@@ -72,7 +72,7 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
         result: ModelResult = ModelResult(fragment['scene_name'], glb, True)
         await self.send_result(result)
 
-    async def recon_scene_batched(self, img_dir: str) -> bytes:
+    def recon_scene_batched(self, img_dir: str) -> bytes:
         dataset = JPEGFiles(img_dir)
         
         for i in range(len(dataset)):

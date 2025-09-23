@@ -12,7 +12,7 @@ from models.SLAM3R.slam3r.models import Local2WorldModel, Image2PointsModel
 from models.SLAM3R.slam3r.utils.recon_utils import *
 
 class SLAM3RScene:
-    batch_size = 5
+    batch_size = 9
 
     def __init__(self):
         self.batch_idx = 0
@@ -94,7 +94,7 @@ class SLAM3RReconstructModel(BaseReconstructionModel):
                             imgs: list,
 
                             device: str = 'cuda',
-                            win_r: int = 5,
+                            win_r: int = 9,
                             conf_thres_i2p: float = 1.5,
                             num_scene_frame: int = 10,
                             update_buffer_intv: int = 1,

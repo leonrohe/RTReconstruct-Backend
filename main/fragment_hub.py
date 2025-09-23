@@ -1,5 +1,7 @@
 import asyncio
 import json
+import sys
+import logging
 from common_utils import myutils
 from db.base_db_handler import DBHandler
 from db.sqlite_db_handler import SQLiteDBHandler
@@ -7,6 +9,33 @@ from typing import Any, Dict, List, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
+
+# =========================
+# Logging Configuration
+# =========================
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# --- Formatter ---
+formatter = logging.Formatter(
+    fmt="%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+# --- Console Handler ---
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+
+# --- File Handler ---
+file_handler = logging.FileHandler("server.log")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+
+# --- Add handlers (avoid duplicates if script reloads) ---
+if not logger.handlers:
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
 
 # =========================
 # FastAPI WebSocket Backend
@@ -54,7 +83,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
         assert 'scene' in handshake, "Handshake must contain 'scene'"
         client_scene = handshake['scene']
     except Exception as e:
-        print(f"Error receiving handshake: {e}")
+        logger.error(f"Error receiving handshake: {e}")
         await websocket.close(code=1008)
         return
     
@@ -65,15 +94,15 @@ async def websocket_client_endpoint(websocket: WebSocket):
     connected_clients[client_id] = websocket
     client_events.setdefault(client_id, asyncio.Event())
     scene_clients.setdefault(client_scene, set()).add(client_id)
-    print(f"Client connected: {client_id}, with role: {client_role}, scene: {client_scene}")
+    logger.info(f"Client connected: {client_id}, with role: {client_role}, scene: {client_scene}")
 
     # If model output is already available for this scene, send it immediately
     if client_scene in model_outputs:
-        print(f"Sending model outputs for scene: {client_scene} to client: {client_id}")
+        logger.info(f"Sending model outputs for scene: {client_scene} to client: {client_id}")
         for model_name, result in model_outputs[client_scene].items():
             await websocket.send_bytes(result.Serialize())
     else:
-        print(f"No model outputs available for scene: {client_scene}")
+        logger.info(f"No model outputs available for scene: {client_scene}")
 
     # --- Background task to send model results to the client when available ---
     async def send_task():
@@ -85,10 +114,10 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 # Send all available model outputs for the client's scene
                 if client_id in scene_clients.get(client_scene, set()):
                     for model_name, model_result in model_outputs.get(client_scene, {}).items():
-                        print(f"Sending model output for scene: {client_scene}, model: {model_name} to client: {client_id}")
+                        logger.info(f"Sending model output for scene: {client_scene}, model: {model_name} to client: {client_id}")
                         await websocket.send_bytes(model_result.Serialize())
         except Exception as e:
-            print(f"Send task error for client {client_id}: {e}")
+            logger.error(f"Send task error for client {client_id}: {e}")
 
     send_loop = asyncio.create_task(send_task())
 
@@ -100,7 +129,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
             (magic, version) = data[0:4], int.from_bytes(data[4:8], 'little')
 
             if(magic != b'LEON'):
-                print(f"Received invalid data from client {client_id}, expected LEON magic bytes")
+                logger.warning(f"Received invalid data from client {client_id}, expected LEON magic bytes")
                 continue
         
             if(version == 1): # Fragment request
@@ -108,7 +137,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 model_name = data[16:16 + model_name_length].decode('utf-8')
                 scene_name_length = int.from_bytes(data[16 + model_name_length:16 + model_name_length + 4], 'little')
                 scene_name = data[20 + model_name_length:20 + model_name_length + scene_name_length].decode('utf-8')
-                print(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
+                logger.info(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
 
                 # save fragment by idx
                 if(client_role != "eval"):
@@ -119,16 +148,16 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 if model_name in model_inputs:
                     await model_inputs[model_name].put(data)
                 else:
-                    print(f"Model {model_name} not found, sending error to client")
+                    logger.error(f"Model {model_name} not found, sending error to client")
                     await websocket.send_text(json.dumps({"error": f"No model with name '{model_name}' found"}))
             
             elif(version == 2): # Translate request
                 transform_request: Dict[str, Any] = myutils.DeserializeTransformFragment(data)
-                print(f"Received Translation data: {transform_request} from client: {client_id}")
+                logger.info(f"Received Translation data: {transform_request} from client: {client_id}")
 
                 scene_name = transform_request['name']
                 if(scene_name not in model_outputs):
-                    print(f"No scene named '{scene_name}' found in model outputs. Ignoring transform request.")
+                    logger.warning(f"No scene named '{scene_name}' found in model outputs. Ignoring transform request.")
                     continue
 
                 for _, result in model_outputs[scene_name].items():
@@ -141,7 +170,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
                     if cid in client_events and cid != client_id:
                         client_events[cid].set()
     except WebSocketDisconnect:
-        print(f"Client disconnected: {client_id}")
+        logger.info(f"Client disconnected: {client_id}")
         del connected_clients[client_id]
     finally:
         client_events.pop(client_id, None)
@@ -162,7 +191,7 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 
     queue = asyncio.Queue()
     model_inputs[model_name] = queue
-    print(f"Model [{model_name}] connected")
+    logger.info(f"Model [{model_name}] connected")
 
     try:
         with SQLiteDBHandler("db/results.db") as dbhandler:
@@ -170,18 +199,18 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                 # Wait for a fragment from any client
                 fragment: bytes = await queue.get()
                 await websocket.send_bytes(fragment)
-                print(f"Sent fragment from queue to model [{model_name}]")
+                logger.info(f"Sent fragment from queue to model [{model_name}]")
 
                 # Wait for the model's result
                 result_bytes: bytes = await websocket.receive_bytes()
 
                 # 0 for failure, 1 for successful but unimportant result
                 if(result_bytes == b'0' or result_bytes == b'1'):
-                    print(f"Model [{model_name}] sent no result. Continuing to next fragment.")
+                    logger.info(f"Model [{model_name}] sent no result. Continuing to next fragment.")
                     continue
 
                 result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
-                print(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
+                logger.info(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
 
                 # Store the result by scene and model
                 scene = model_outputs.setdefault(result.scene_name, {})
@@ -192,14 +221,14 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                 
                 # Store the result in the database
                 dbhandler.insert_result(model_name, result)
-                print(f"Inserted result for scene: {result.scene_name}, model: {model_name} into database")
+                logger.info(f"Inserted result for scene: {result.scene_name}, model: {model_name} into database")
 
                 # Notify all clients interested in this scene
                 for client_id in scene_clients.get(result.scene_name, set()):
                     if client_id in client_events:
                         client_events[client_id].set()
     except WebSocketDisconnect as e:
-        print(f"Model {model_name} disconnected, because: {e}")
+        logger.error(f"Model {model_name} disconnected, because: {e}")
     finally:
         del model_inputs[model_name]
 
@@ -207,4 +236,5 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
 # Run the FastAPI app
 # =========================
 if __name__ == "__main__":
+    logger.info("Starting FastAPI server...")
     uvicorn.run(app, host="0.0.0.0", port=5000)

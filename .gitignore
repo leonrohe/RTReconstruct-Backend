@@ -56,3 +56,4 @@ secrets.json
 # Ignore data/output folders (customize as needed)
 data/
 output/
+main/fragments

@@ -27,6 +27,8 @@ model_inputs: Dict[str, asyncio.Queue] = {}
 # Maps scene name to a dictionary of model outputs, e.g. {'scene1': {'neucon': b'...', 'slam3r': b'...'}}
 model_outputs: Dict[str, Dict[str, myutils.ModelResult]] = {}
 
+scene_fragment_idx: Dict[str, int] = {}
+
 # =========================
 # Client WebSocket Endpoint
 # =========================
@@ -107,6 +109,12 @@ async def websocket_client_endpoint(websocket: WebSocket):
                 scene_name_length = int.from_bytes(data[16 + model_name_length:16 + model_name_length + 4], 'little')
                 scene_name = data[20 + model_name_length:20 + model_name_length + scene_name_length].decode('utf-8')
                 print(f"Received data for model: {model_name}, scene: {scene_name} from client: {client_id}")
+
+                # save fragment by idx
+                if(client_role != "eval"):
+                    with open(f"/app/main/fragments/{scene_name}_{scene_fragment_idx.get(scene_name, 0)}.bin", "wb") as f:
+                        f.write(data)
+                        scene_fragment_idx[scene_name] = scene_fragment_idx.get(scene_name, 0) + 1
 
                 if model_name in model_inputs:
                     await model_inputs[model_name].put(data)

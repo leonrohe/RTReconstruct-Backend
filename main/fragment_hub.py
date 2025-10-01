@@ -1,9 +1,10 @@
 import asyncio
 import json
+import time
 import sys
+import csv
 import logging
 from common_utils import myutils
-from db.base_db_handler import DBHandler
 from db.sqlite_db_handler import SQLiteDBHandler
 from typing import Any, Dict, List, Set
 
@@ -18,7 +19,7 @@ logger.setLevel(logging.INFO)
 
 # --- Formatter ---
 formatter = logging.Formatter(
-    fmt="%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
+    fmt="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
@@ -176,19 +177,22 @@ async def websocket_client_endpoint(websocket: WebSocket):
         client_events.pop(client_id, None)
         send_loop.cancel()
 
-# =========================
-# Model WebSocket Endpoint
-# =========================
 @app.websocket("/ws/model/{model_name}")
 async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
-    """
-    Handles model WebSocket connections.
-    - Receives data fragments from the queue and sends them to the model.
-    - Receives results from the model and stores them in model_outputs.
-    - Notifies all interested clients when a new result is available.
-    """
+    def init_csv() -> None:
+        header = ["in_size", "inference_time", "out_size"]
+        with open(f"{model_name}.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(header)
+
+    def append_csv(in_size: int, inference_time: float, out_size: int) -> None:
+        with open(f"{model_name}.csv", "a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([in_size, inference_time, out_size])
+
     await websocket.accept()
 
+    init_csv()
     queue = asyncio.Queue()
     model_inputs[model_name] = queue
     logger.info(f"Model [{model_name}] connected")
@@ -198,19 +202,33 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
             while True:
                 # Wait for a fragment from any client
                 fragment: bytes = await queue.get()
+
+                # --- start timer ---
+                t0 = time.perf_counter()
+
                 await websocket.send_bytes(fragment)
-                logger.info(f"Sent fragment from queue to model [{model_name}]")
+                logger.info(f"Sent fragment from queue to model [{model_name}] | fragments remaining in queue: {queue.qsize()}")
 
                 # Wait for the model's result
                 result_bytes: bytes = await websocket.receive_bytes()
 
+                # --- stop timer ---
+                t1 = time.perf_counter()
+                elapsed_ms = (t1 - t0) * 1000
+
                 # 0 for failure, 1 for successful but unimportant result
                 if(result_bytes == b'0' or result_bytes == b'1'):
-                    logger.info(f"Model [{model_name}] sent no result. Continuing to next fragment.")
+                    append_csv(0, 0, 0)
+                    logger.warning(f"Model [{model_name}] sent no result. Continuing to next fragment.")
                     continue
 
-                result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)
-                logger.info(f"Received result for scene: {result.scene_name} from model: {model_name}, PointCloud: {result.is_pointcloud}")
+                result: myutils.ModelResult = myutils.DeserializeResult(result_bytes)                
+                logger.info(
+                    f"Received result for scene: {result.scene_name} "
+                    f"from model: {model_name}, PointCloud: {result.is_pointcloud}"
+                )
+
+                append_csv(len(fragment), elapsed_ms, len(result_bytes))
 
                 # Store the result by scene and model
                 scene = model_outputs.setdefault(result.scene_name, {})
@@ -218,7 +236,7 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                     scene[model_name] = result
                 else:
                     scene[model_name].SetGLB(result.output)
-                
+
                 # Store the result in the database
                 dbhandler.insert_result(model_name, result)
                 logger.info(f"Inserted result for scene: {result.scene_name}, model: {model_name} into database")

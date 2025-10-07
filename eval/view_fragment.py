@@ -8,11 +8,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WebSocket fragment sender")
 
     parser.add_argument("fragment", help="the path to the fragment.")
-    parser.add_argument(
-        "-img",
-        action="store_true",   # just a flag, no value required
-        help="Display images contained in the fragment."
-    )
+    parser.add_argument("-img", help="Display n images contained in the fragment.")
 
     return parser.parse_args()
 
@@ -31,9 +27,12 @@ if __name__ == "__main__":
 
         # optionally open jpeg images
         if args.img:
-            for idx, img_bytes in enumerate(fragment.get('images', [])):
+            indices = args.img.split(',')
+            for indice in indices:
+                i = int(indice)
+                img_bytes = fragment['images'][i]
                 try:
                     img = Image.open(io.BytesIO(img_bytes))
-                    img.show(title=f"Fragment Image {idx}")
+                    img.show(title=f"Fragment Image {i}")
                 except Exception as e:
-                    print(f"Error opening image {idx}: {e}")
+                    print(f"Error opening image {i}: {e}")

@@ -102,6 +102,10 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
                     self.states.set_mode(Mode.RELOC)
                 self.states.set_frame(frame)
 
+                if add_new_kf:
+                    self.keyframes.append(frame)    
+                    self.states.queue_global_optimization(len(self.keyframes) - 1)
+
             elif mode == Mode.RELOC:
                 X, C = mast3r_inference_mono(self.model, frame)
                 frame.update_pointmap(X, C)
@@ -109,10 +113,6 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
                 self.states.queue_reloc()
             else:
                 raise Exception("Invalid mode")
-
-            if add_new_kf:
-                self.keyframes.append(frame)    
-                self.states.queue_global_optimization(len(self.keyframes) - 1)
 
             run_backend(states, keyframes)
             self.frame_idx += 1

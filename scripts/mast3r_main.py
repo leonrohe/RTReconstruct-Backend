@@ -102,10 +102,6 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
                     self.states.set_mode(Mode.RELOC)
                 self.states.set_frame(frame)
 
-                if add_new_kf:
-                    self.keyframes.append(frame)
-                    self.states.queue_global_optimization(len(self.keyframes) - 1)
-
             elif mode == Mode.RELOC:
                 X, C = mast3r_inference_mono(self.model, frame)
                 frame.update_pointmap(X, C)
@@ -113,6 +109,10 @@ class MAST3RReconstructionModel(BaseReconstructionModel):
                 self.states.queue_reloc()
             else:
                 raise Exception("Invalid mode")
+
+            if add_new_kf:
+                self.keyframes.append(frame)    
+                self.states.queue_global_optimization(len(self.keyframes) - 1)
 
             run_backend(states, keyframes)
             self.frame_idx += 1
@@ -252,6 +252,7 @@ def run_backend(states, keyframes):
 W, H = 512, 384 # Width, Height of image for tensors
 MODEL_NAME = os.getenv("MODEL_NAME", "mast3r")
 SERVER_URL = os.getenv("SERVER_URL", "ws://router:5000/ws/model")
+KF_BUFFER = int(os.getenv("KF_BUFFER", "512")) if os.getenv("KF_BUFFER", "512").isdigit() else 512
 if __name__ == "__main__":
     mp.set_start_method("spawn")
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -266,7 +267,7 @@ if __name__ == "__main__":
     load_config(args.config)
     
     manager = mp.Manager()
-    keyframes = SharedKeyframes(manager, H, W)
+    keyframes = SharedKeyframes(manager, H, W, KF_BUFFER)
     states = SharedStates(manager, H, W)
 
     mast3r_model = load_mast3r("/app/models/MASt3R/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth", device=device)

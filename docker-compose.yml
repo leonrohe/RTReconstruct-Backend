@@ -84,6 +84,7 @@ services:
     environment:
       - SERVER_URL=ws://router:5000/ws/model
       - MODEL_NAME=mast3r
+      - KF_BUFFER=128
     volumes:
       - ./common_utils:/app/common_utils
       - ./scripts:/app/scripts

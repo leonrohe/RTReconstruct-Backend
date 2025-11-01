@@ -1,31 +1,26 @@
 # --------------------------------------------------------
-# Evaluation utilities. The code is adapted from SLAM3R: 
-# https://github.com/PKU-VCL-3DV/SLAM3R/blob/main/evaluation/eval_recon.py
+# Optimized FPFH-based Point Cloud Alignment
 # --------------------------------------------------------
 import os
-from os.path import join 
-import json
-import trimesh
 import argparse
 import numpy as np
-import random
-import matplotlib.pyplot as pl
-pl.ion()
+import trimesh
 import open3d as o3d
 from scipy.spatial import cKDTree as KDTree
-from tqdm import tqdm
 
-parser = argparse.ArgumentParser(description="Inference on a pair of images from ScanNet++")
-parser.add_argument("--save_vis", action="store_true")
-parser.add_argument("--seed", type=int, default=42, help="seed for python random")
-parser.add_argument("--icp", type=str, default='plain', help='')
-parser.add_argument("--gt_pcd", type=str, required=True, help='')
-parser.add_argument("--pred_pcd", type=str, required=True, help='')
-parser.add_argument("--n_samples", type=int, default=100, help='number of points per RANSAC hypothesis')
-parser.add_argument("--n_hypotheses", type=int, default=512, help='number of RANSAC hypotheses')
-parser.add_argument("--inlier_threshold", type=float, default=0.1, help='RANSAC inlier distance threshold')
-parser.add_argument("--use_fpfh", action="store_true", help='Use FPFH features for initial alignment')
+parser = argparse.ArgumentParser(description="FPFH-based point cloud alignment")
+parser.add_argument("--gt_pcd", type=str, required=True, help='Ground truth point cloud path')
+parser.add_argument("--pred_pcd", type=str, required=True, help='Predicted point cloud path')
+parser.add_argument("--voxel_size", type=float, default=0.05, help='Voxel size for downsampling (default: 0.05)')
+parser.add_argument("--icp", type=str, default='point', choices=['point', 'plane'], help='ICP method')
+parser.add_argument("--icp_threshold", type=float, default=0.02, help='ICP distance threshold')
+parser.add_argument("--max_icp_iterations", type=int, default=100, help='Maximum ICP iterations')
+parser.add_argument("--fpfh_radius_multiplier", type=float, default=5.0, help='FPFH feature radius = voxel_size * this')
+parser.add_argument("--ransac_max_iterations", type=int, default=100000, help='RANSAC max iterations')
+parser.add_argument("--ransac_confidence", type=float, default=0.999, help='RANSAC confidence')
 parser.add_argument("--skip_icp", action="store_true", help='Skip ICP refinement')
+parser.add_argument("--save_aligned", type=str, default=None, help='Save aligned point cloud to this path')
+parser.add_argument("--visualize", action="store_true", help='Visualize results')
 
 def load_and_sample_gt_mesh(glb_path, num_points=100000):
     # Load GLB mesh
@@ -55,50 +50,56 @@ def load_pred_pcd_from_glb(glb_path):
     return pts
 
 def analyze_point_clouds(src, tgt):
-    """Analyze point cloud properties to diagnose alignment issues"""
-    print("\n" + "="*60)
+    """Analyze and display point cloud statistics"""
+    print("\n" + "="*70)
     print("POINT CLOUD ANALYSIS")
-    print("="*60)
+    print("="*70)
     
-    # Basic statistics
-    print("\nSource Point Cloud:")
-    print(f"  Points: {len(src)}")
-    print(f"  Min: [{src.min(axis=0)}]")
-    print(f"  Max: [{src.max(axis=0)}]")
-    print(f"  Mean: [{src.mean(axis=0)}]")
-    print(f"  Std: [{src.std(axis=0)}]")
-    src_extent = src.max(axis=0) - src.min(axis=0)
-    print(f"  Extent: [{src_extent}]")
-    print(f"  Diagonal: {np.linalg.norm(src_extent):.4f}")
+    def print_stats(name, pcd):
+        extent = pcd.max(axis=0) - pcd.min(axis=0)
+        diagonal = np.linalg.norm(extent)
+        print(f"\n{name}:")
+        print(f"  Points:   {len(pcd):,}")
+        print(f"  Center:   [{pcd.mean(axis=0)[0]:8.4f}, {pcd.mean(axis=0)[1]:8.4f}, {pcd.mean(axis=0)[2]:8.4f}]")
+        print(f"  Extent:   [{extent[0]:8.4f}, {extent[1]:8.4f}, {extent[2]:8.4f}]")
+        print(f"  Diagonal: {diagonal:8.4f}")
+        return diagonal
     
-    print("\nTarget Point Cloud:")
-    print(f"  Points: {len(tgt)}")
-    print(f"  Min: [{tgt.min(axis=0)}]")
-    print(f"  Max: [{tgt.max(axis=0)}]")
-    print(f"  Mean: [{tgt.mean(axis=0)}]")
-    print(f"  Std: [{tgt.std(axis=0)}]")
-    tgt_extent = tgt.max(axis=0) - tgt.min(axis=0)
-    print(f"  Extent: [{tgt_extent}]")
-    print(f"  Diagonal: {np.linalg.norm(tgt_extent):.4f}")
+    src_diag = print_stats("Source (Predicted)", src)
+    tgt_diag = print_stats("Target (Ground Truth)", tgt)
     
-    # Scale ratio
-    src_scale = np.linalg.norm(src_extent)
-    tgt_scale = np.linalg.norm(tgt_extent)
-    scale_ratio = tgt_scale / src_scale
-    print(f"\nScale ratio (target/source): {scale_ratio:.4f}")
-    
-    # Center distance
+    scale_ratio = tgt_diag / src_diag
     center_dist = np.linalg.norm(src.mean(axis=0) - tgt.mean(axis=0))
-    print(f"Distance between centers: {center_dist:.4f}")
     
-    print("="*60 + "\n")
+    print(f"\nRelative Metrics:")
+    print(f"  Scale ratio (GT/Pred): {scale_ratio:.4f}")
+    print(f"  Center distance:       {center_dist:.4f}")
+    print("="*70)
     
-    return {
-        'src_scale': src_scale,
-        'tgt_scale': tgt_scale,
-        'scale_ratio': scale_ratio,
-        'center_dist': center_dist
-    }
+    return scale_ratio, center_dist
+
+def preprocess_point_cloud(points, voxel_size):
+    """Downsample and estimate normals"""
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+    
+    # Downsample
+    pcd_down = pcd.voxel_down_sample(voxel_size)
+    
+    # Estimate normals
+    radius_normal = voxel_size * 2
+    pcd_down.estimate_normals(
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+    
+    return pcd_down
+
+def compute_fpfh_features(pcd, voxel_size, radius_multiplier=5.0):
+    """Compute FPFH features for point cloud"""
+    radius_feature = voxel_size * radius_multiplier
+    fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+        pcd,
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+    return fpfh
 
 def normalize_point_cloud(pcd):
     """Normalize point cloud to unit sphere centered at origin"""
@@ -110,396 +111,289 @@ def normalize_point_cloud(pcd):
 
 def denormalize_transformation(T, src_center, src_scale, tgt_center, tgt_scale):
     """Convert transformation from normalized space back to original space"""
-    # T transforms normalized source to normalized target
-    # We need: original_source -> normalized -> transformed -> denormalized -> original_target
-    
-    # Build complete transformation
-    T_full = np.eye(4)
-    
-    # 1. Center and scale source
+    # Build normalization transformations
     T_normalize_src = np.eye(4)
     T_normalize_src[:3, 3] = -src_center
     T_scale_src = np.eye(4)
     T_scale_src[:3, :3] = np.eye(3) / src_scale
     
-    # 2. Apply learned transformation
-    # 3. Denormalize to target
+    # Build denormalization transformations
     T_scale_tgt = np.eye(4)
     T_scale_tgt[:3, :3] = np.eye(3) * tgt_scale
     T_denormalize_tgt = np.eye(4)
     T_denormalize_tgt[:3, 3] = tgt_center
     
-    # Compose all transformations
+    # Compose: denormalize_tgt @ scale_tgt @ T @ scale_src @ normalize_src
     T_full = T_denormalize_tgt @ T_scale_tgt @ T @ T_scale_src @ T_normalize_src
     
     return T_full
 
-def fpfh_registration(source, target, voxel_size=0.05):
-    """Use FPFH features for initial alignment"""
-    print("Computing FPFH features for global registration...")
-    
-    # Convert to Open3D
-    source_pcd = o3d.geometry.PointCloud()
-    source_pcd.points = o3d.utility.Vector3dVector(source)
-    
-    target_pcd = o3d.geometry.PointCloud()
-    target_pcd.points = o3d.utility.Vector3dVector(target)
-    
-    # Downsample
-    source_down = source_pcd.voxel_down_sample(voxel_size)
-    target_down = target_pcd.voxel_down_sample(voxel_size)
-    
-    # Estimate normals
-    radius_normal = voxel_size * 2
-    source_down.estimate_normals(
-        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
-    target_down.estimate_normals(
-        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
-    
-    # Compute FPFH features
-    radius_feature = voxel_size * 5
-    source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-        source_down,
-        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
-    target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-        target_down,
-        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
-    
-    # RANSAC registration
+def execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, 
+                                voxel_size, max_iterations=100000, confidence=0.999):
+    """Execute RANSAC-based global registration using FPFH features"""
     distance_threshold = voxel_size * 1.5
+    
+    print(f"\nGlobal Registration (FPFH + RANSAC):")
+    print(f"  Distance threshold: {distance_threshold:.4f}")
+    print(f"  Max iterations:     {max_iterations:,}")
+    print(f"  Confidence:         {confidence}")
+    
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-        source_down, target_down, source_fpfh, target_fpfh, True,
-        distance_threshold,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-        3, [
+        source_down, target_down, source_fpfh, target_fpfh, 
+        mutual_filter=True,
+        max_correspondence_distance=distance_threshold,
+        estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+        ransac_n=4,  # Use 4 points instead of 3 for better stability
+        checkers=[
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
             o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-        ], o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+        ],
+        criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(max_iterations, confidence))
     
-    print(f"FPFH registration: fitness={result.fitness:.4f}, inlier_rmse={result.inlier_rmse:.4f}")
+    print(f"\n  Result:")
+    print(f"    Fitness:      {result.fitness:.4f}")
+    print(f"    Inlier RMSE:  {result.inlier_rmse:.4f}")
+    print(f"    Correspondences: {len(result.correspondence_set)}")
     
-    return result.transformation
+    return result
 
-def umeyama_alignment(X, Y, use_median=False):
-    """
-    Perform Umeyama alignment to align two point sets with potential size differences.
+def refine_registration_icp(source, target, init_transform, threshold, method='point', max_iterations=100):
+    """Refine alignment using ICP"""
+    print(f"\nICP Refinement ({method}-to-{method}):")
+    print(f"  Threshold:      {threshold:.4f}")
+    print(f"  Max iterations: {max_iterations}")
+    
+    if method == 'point':
+        estimation = o3d.pipelines.registration.TransformationEstimationPointToPoint()
+    else:  # plane
+        estimation = o3d.pipelines.registration.TransformationEstimationPointToPlane()
+    
+    result = o3d.pipelines.registration.registration_icp(
+        source, target, threshold, init_transform, estimation,
+        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=max_iterations))
+    
+    print(f"\n  Result:")
+    print(f"    Fitness:      {result.fitness:.4f}")
+    print(f"    Inlier RMSE:  {result.inlier_rmse:.4f}")
+    
+    return result
 
-    Parameters:
-    X (numpy.ndarray): Source point set with shape (N, D).
-    Y (numpy.ndarray): Target point set with shape (N, D).
-    use_median (bool): Use median instead of mean for centroid (more robust to outliers)
-
-    Returns:
-    T (numpy.ndarray): Transformation matrix (D+1, D+1) that aligns X to Y.
-    """
-    
-    # Calculate centroids - use mean for better accuracy with larger samples
-    if use_median and X.shape[0] < 10:
-        centroid_X = np.median(X, axis=0)
-        centroid_Y = np.median(Y, axis=0)
-    else:
-        centroid_X = np.mean(X, axis=0)
-        centroid_Y = np.mean(Y, axis=0)
-
-    # Center the point sets
-    X_centered = X - centroid_X
-    Y_centered = Y - centroid_Y
-
-    # Solve rotation using SVD with rectification
-    S = np.dot(X_centered.T, Y_centered)
-    U, _, VT = np.linalg.svd(S)
-    rectification = np.eye(3)
-    rectification[-1,-1] = np.linalg.det(VT.T @ U.T)
-    R = VT.T @ rectification @ U.T 
-
-    # Scale factor - use mean for larger samples
-    if use_median and X.shape[0] < 10:
-        sx = np.median(np.linalg.norm(X_centered, axis=1))
-        sy = np.median(np.linalg.norm(Y_centered, axis=1))
-    else:
-        sx = np.mean(np.linalg.norm(X_centered, axis=1))
-        sy = np.mean(np.linalg.norm(Y_centered, axis=1))
-    
-    c = sy / sx if sx > 1e-8 else 1.0
-
-    # Translation
-    t = centroid_Y - c * np.dot(R, centroid_X)
-
-    # Transformation matrix
-    T = np.zeros((X.shape[1] + 1, X.shape[1] + 1))
-    T[:X.shape[1], :X.shape[1]] = c * R
-    T[:X.shape[1], -1] = t
-    T[-1, -1] = 1
-
-    return T
-
-def homogeneous(coordinates):
-    homogeneous_coordinates = np.hstack((coordinates, np.ones((coordinates.shape[0], 1))))
-    return homogeneous_coordinates
-
-def compute_alignment_error(src_pts, tar_pts, transform):
-    """Compute alignment error after applying transformation"""
-    transformed = (transform @ homogeneous(src_pts).T)[:3].T
-    residuals = np.linalg.norm(transformed - tar_pts, axis=1)
-    return residuals
-
-def SKU_RANSAC(src_pts, tar_pts, n_samples=100, n_hypotheses=512, inlier_threshold=0.1):
-    """
-    RANSAC-based alignment with improved sampling and validation.
-    
-    Parameters:
-    src_pts: Source point cloud (N, 3)
-    tar_pts: Target point cloud (N, 3)
-    n_samples: Number of points to sample per hypothesis
-    n_hypotheses: Number of RANSAC iterations
-    inlier_threshold: Distance threshold for inlier counting
-    """
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    
-    # Downsample for faster RANSAC if we have too many points
-    max_points_for_ransac = 10000
-    if len(src_pts) > max_points_for_ransac:
-        print(f"Downsampling from {len(src_pts)} to {max_points_for_ransac} points for RANSAC...")
-        indices = np.random.choice(len(src_pts), max_points_for_ransac, replace=False)
-        src_pts_ransac = src_pts[indices]
-        tar_pts_ransac = tar_pts[indices]
-    else:
-        src_pts_ransac = src_pts
-        tar_pts_ransac = tar_pts
-    
-    # Ensure we don't sample more points than available
-    n_samples = min(n_samples, len(src_pts_ransac))
-    
-    best_score = -np.inf
-    best_transform = np.identity(4)
-    best_inliers = 0
-    
-    print(f"Running RANSAC with {n_samples} points per hypothesis, {n_hypotheses} iterations...")
-    print(f"Inlier threshold: {inlier_threshold}")
-    
-    for hid in tqdm(range(n_hypotheses), desc="Running Umeyama RANSAC"):
-        # Sample points
-        ids = np.random.choice(len(src_pts_ransac), n_samples, replace=False)
-        s_mini = src_pts_ransac[ids]
-        t_mini = tar_pts_ransac[ids]
-        
-        # Compute transformation hypothesis
-        try:
-            hypo = umeyama_alignment(s_mini, t_mini, use_median=(n_samples < 20))
-        except np.linalg.LinAlgError:
-            continue
-        
-        # Evaluate on downsampled points
-        residuals = compute_alignment_error(src_pts_ransac, tar_pts_ransac, hypo)
-        
-        # Count inliers
-        inliers = np.sum(residuals < inlier_threshold)
-        median_error = np.median(residuals)
-        
-        # Score: prioritize inlier count significantly
-        score = inliers * 1000 - median_error
-        
-        if score > best_score:
-            best_score = score
-            best_transform = hypo
-            best_inliers = inliers
-            best_median_error = median_error
-    
-    inlier_pct = 100 * best_inliers / len(src_pts_ransac)
-    print(f"Best alignment: {best_inliers}/{len(src_pts_ransac)} inliers ({inlier_pct:.1f}%), median error: {best_median_error:.4f}")
-    
-    # Refine with inliers if we have enough
-    if best_inliers > n_samples * 2:
-        print(f"Refining transformation with inliers...")
-        residuals = compute_alignment_error(src_pts_ransac, tar_pts_ransac, best_transform)
-        inlier_mask = residuals < inlier_threshold
-        n_inliers_refine = np.sum(inlier_mask)
-        if n_inliers_refine > 10:
-            print(f"  Using {n_inliers_refine} inliers for refinement...")
-            best_transform = umeyama_alignment(src_pts_ransac[inlier_mask], tar_pts_ransac[inlier_mask])
-    
-    return best_transform
-
-def align_pcd(source:np.array, target:np.array, icp=None, init_trans=None, mask=None, 
-              return_trans=True, voxel_size=0.1, n_samples=100, n_hypotheses=512, 
-              inlier_threshold=0.1, use_fpfh=False, skip_icp=False):
-    """ 
-    Align the scale of source to target using umeyama,
-    then refine the alignment using ICP.
-    """
-    # Apply initial transformation if provided
-    if init_trans is not None:
-        source = trimesh.transformations.transform_points(source, init_trans)
-    
-    # Apply mask if provided (use same mask for both)
-    if mask is not None:
-        source_for_align = source[mask]
-        target_for_align = target[mask]
-    else:
-        source_for_align = source
-        target_for_align = target
-    
-    print(f"Aligning {len(source_for_align)} source points to {len(target_for_align)} target points")
-    
-    # Analyze point clouds
-    stats = analyze_point_clouds(source_for_align, target_for_align)
-    
-    # Normalize both point clouds
-    print("Normalizing point clouds to unit scale...")
-    src_norm, src_center, src_scale = normalize_point_cloud(source_for_align)
-    tgt_norm, tgt_center, tgt_scale = normalize_point_cloud(target_for_align)
-    
-    # Adjust inlier threshold for normalized space
-    norm_inlier_threshold = inlier_threshold / max(src_scale, tgt_scale)
-    print(f"Normalized inlier threshold: {norm_inlier_threshold:.6f}")
-    
-    #####################################
-    # First step: Coarse registration
-    #####################################
-    if use_fpfh:
-        print("\nUsing FPFH-based global registration...")
-        Rt_norm = fpfh_registration(src_norm, tgt_norm, voxel_size=0.05)
-    else:
-        print("\nUsing RANSAC + Umeyama registration...")
-        Rt_norm = SKU_RANSAC(src_norm, tgt_norm, 
-                             n_samples=n_samples, 
-                             n_hypotheses=n_hypotheses,
-                             inlier_threshold=norm_inlier_threshold)
-    
-    # Convert back to original space
-    Rt_step1 = denormalize_transformation(Rt_norm, src_center, src_scale, tgt_center, tgt_scale)
-    
-    # Apply first transformation to full source cloud
-    source_step1 = trimesh.transformations.transform_points(source, Rt_step1)
-    
-    if skip_icp:
-        print("Skipping ICP refinement (--skip_icp flag set)")
-        transformation_s2t = Rt_step1
-        transformed_source = source_step1
-    else:
-        #####################################
-        # Second step: Fine registration using ICP
-        #####################################
-        print("\nRunning point-to-plane ICP refinement...")
-        icp_thr = voxel_size * 2
-
-        # Downsample for ICP efficiency
-        pcd_source_step1 = o3d.geometry.PointCloud()
-        pcd_source_step1.points = o3d.utility.Vector3dVector(source_step1)
-        pcd_source_step1 = pcd_source_step1.voxel_down_sample(voxel_size=voxel_size)
-        
-        pcd_target = o3d.geometry.PointCloud()
-        pcd_target.points = o3d.utility.Vector3dVector(target)
-        pcd_target = pcd_target.voxel_down_sample(voxel_size=voxel_size)
-        pcd_target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-        # Choose ICP method
-        if icp == "point":
-            icp_method = o3d.pipelines.registration.TransformationEstimationPointToPoint()
-        elif icp == 'plain':
-            icp_method = o3d.pipelines.registration.TransformationEstimationPointToPlane()
-        else:
-            raise ValueError(f"Unknown ICP method: {icp}")
-        
-        # Run ICP
-        reg_p2l = o3d.pipelines.registration.registration_icp(
-            pcd_source_step1, pcd_target, icp_thr, np.identity(4), icp_method,
-            o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100))
-        
-        Rt_step2 = reg_p2l.transformation
-        
-        print(f"ICP converged: fitness={reg_p2l.fitness:.4f}, inlier_rmse={reg_p2l.inlier_rmse:.4f}")
-        
-        # Combine transformations and apply to original source
-        transformation_s2t = Rt_step2 @ Rt_step1
-        transformed_source = trimesh.transformations.transform_points(source, transformation_s2t)
-    
-    if return_trans:
-        return transformed_source, transformation_s2t
-    else:
-        return transformed_source
-
-if __name__ == "__main__":
-    """
-    The script consists of two parts:
-    1. Align the predicted point cloud with the ground truth point cloud using the Umeyama and ICP algorithms. 
-    2. calculate the reconstruction metrics.
-    """
-    args = parser.parse_args()
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-    
-    num_sample_points = 100000
-    voxelize_size = 0.005
-    
-    print("Loading point clouds...")
-    gt_pcd = load_and_sample_gt_mesh(args.gt_pcd)
-    print(f"GT point cloud: {gt_pcd.shape}")
-    
-    pred_pcd = load_pred_pcd_from_glb(args.pred_pcd)
-    print(f"Predicted point cloud: {pred_pcd.shape}")
-   
-    # Perform alignment
-    print("\n" + "="*60)
-    print("Starting alignment process...")
-    print("="*60)
-    
-    aligned_pcd, trans = align_pcd(
-        pred_pcd, gt_pcd, 
-        init_trans=None, 
-        mask=None,
-        icp=args.icp, 
-        return_trans=True,
-        voxel_size=voxelize_size*2,
-        n_samples=args.n_samples,
-        n_hypotheses=args.n_hypotheses,
-        inlier_threshold=args.inlier_threshold,
-        use_fpfh=args.use_fpfh,
-        skip_icp=args.skip_icp
-    )
-    
-    print("\n" + "="*60)
-    print("Alignment complete!")
-    print("="*60)
-    
-    # Compute final alignment error using KDTree (memory efficient)
+def compute_alignment_metrics(aligned_pcd, gt_pcd):
+    """Compute comprehensive alignment metrics"""
     print("\nComputing alignment metrics...")
+    
+    # Use KDTree for efficient nearest neighbor search
     tree = KDTree(gt_pcd)
     distances, _ = tree.query(aligned_pcd, k=1)
     
-    print(f"\nFinal alignment metrics:")
-    print(f"  Mean distance: {np.mean(distances):.6f}")
-    print(f"  Median distance: {np.median(distances):.6f}")
-    print(f"  90th percentile: {np.percentile(distances, 90):.6f}")
-    print(f"  95th percentile: {np.percentile(distances, 95):.6f}")
-    print(f"  99th percentile: {np.percentile(distances, 99):.6f}")
+    metrics = {
+        'mean': np.mean(distances),
+        'median': np.median(distances),
+        'std': np.std(distances),
+        'min': np.min(distances),
+        'max': np.max(distances),
+        'p90': np.percentile(distances, 90),
+        'p95': np.percentile(distances, 95),
+        'p99': np.percentile(distances, 99),
+    }
+    
+    # Count points within various thresholds
+    thresholds = [0.01, 0.05, 0.1, 0.5]
+    for thresh in thresholds:
+        pct = 100 * np.sum(distances < thresh) / len(distances)
+        metrics[f'within_{thresh}'] = pct
+    
+    return metrics, distances
 
-    # ----- Visualization -----
+def print_metrics(metrics):
+    """Pretty print alignment metrics"""
+    print("\n" + "="*70)
+    print("ALIGNMENT METRICS")
+    print("="*70)
+    print(f"\nDistance Statistics:")
+    print(f"  Mean:     {metrics['mean']:.6f}")
+    print(f"  Median:   {metrics['median']:.6f}")
+    print(f"  Std Dev:  {metrics['std']:.6f}")
+    print(f"  Min:      {metrics['min']:.6f}")
+    print(f"  Max:      {metrics['max']:.6f}")
+    
+    print(f"\nPercentiles:")
+    print(f"  90th:     {metrics['p90']:.6f}")
+    print(f"  95th:     {metrics['p95']:.6f}")
+    print(f"  99th:     {metrics['p99']:.6f}")
+    
+    print(f"\nPoints Within Threshold:")
+    print(f"  < 0.01m:  {metrics['within_0.01']:.2f}%")
+    print(f"  < 0.05m:  {metrics['within_0.05']:.2f}%")
+    print(f"  < 0.1m:   {metrics['within_0.1']:.2f}%")
+    print(f"  < 0.5m:   {metrics['within_0.5']:.2f}%")
+    print("="*70)
+
+def visualize_alignment(pred_original, pred_aligned, gt_pcd):
+    """Visualize alignment results"""
     print("\nPreparing visualization...")
-
-    # GT (Green)
+    
+    # Ground truth (Green)
     pcd_gt = o3d.geometry.PointCloud()
     pcd_gt.points = o3d.utility.Vector3dVector(gt_pcd)
-    pcd_gt.paint_uniform_color([0, 1, 0])
-
-    # Original Pred (Blue)
+    pcd_gt.paint_uniform_color([0.0, 0.8, 0.0])  # Green
+    
+    # Original prediction (Blue)
     pcd_pred_raw = o3d.geometry.PointCloud()
-    pcd_pred_raw.points = o3d.utility.Vector3dVector(pred_pcd)
-    pcd_pred_raw.paint_uniform_color([0, 0, 1])
-
-    # Aligned Pred (Red)
+    pcd_pred_raw.points = o3d.utility.Vector3dVector(pred_original)
+    pcd_pred_raw.paint_uniform_color([0.0, 0.4, 1.0])  # Blue
+    
+    # Aligned prediction (Red)
     pcd_pred_aligned = o3d.geometry.PointCloud()
-    pcd_pred_aligned.points = o3d.utility.Vector3dVector(aligned_pcd)
-    pcd_pred_aligned.paint_uniform_color([1, 0, 0])
-
-    print("\nVisualizing: GT (Green) | Original Pred (Blue) | Aligned Pred (Red)")
-    print("Close the window to exit...")
-
+    pcd_pred_aligned.points = o3d.utility.Vector3dVector(pred_aligned)
+    pcd_pred_aligned.paint_uniform_color([1.0, 0.0, 0.0])  # Red
+    
+    print("\nVisualization Legend:")
+    print("  Green = Ground Truth")
+    print("  Blue  = Original Prediction")
+    print("  Red   = Aligned Prediction")
+    print("\nClose window to continue...")
+    
     o3d.visualization.draw_geometries(
         [pcd_gt, pcd_pred_raw, pcd_pred_aligned],
-        window_name="GT (Green) | Original (Blue) | Aligned (Red)",
-        width=1400,
-        height=900,
+        window_name="Alignment Result: GT (Green) | Original (Blue) | Aligned (Red)",
+        width=1600,
+        height=1000,
         point_show_normal=False
     )
+
+def main():
+    args = parser.parse_args()
+    
+    print("="*70)
+    print("FPFH-BASED POINT CLOUD ALIGNMENT")
+    print("="*70)
+    
+    # Load point clouds
+    print("\nLoading point clouds...")
+    pred_pcd = load_pred_pcd_from_glb(args.pred_pcd)
+    print(f"  Predicted: {pred_pcd.shape[0]:,} points")
+    
+    gt_pcd = load_and_sample_gt_mesh(args.gt_pcd)
+    print(f"  Ground Truth: {gt_pcd.shape[0]:,} points")
+    
+    # Analyze point clouds
+    scale_ratio, center_dist = analyze_point_clouds(pred_pcd, gt_pcd)
+    
+    # Normalize point clouds to unit scale (critical for FPFH to work correctly)
+    print("\n" + "="*70)
+    print("NORMALIZATION")
+    print("="*70)
+    print("\nNormalizing point clouds to unit scale...")
+    
+    pred_norm, pred_center, pred_scale = normalize_point_cloud(pred_pcd)
+    print(f"  Source: center={pred_center}, scale={pred_scale:.4f}")
+    
+    gt_norm, gt_center, gt_scale = normalize_point_cloud(gt_pcd)
+    print(f"  Target: center={gt_center}, scale={gt_scale:.4f}")
+    
+    # Preprocess
+    print("\n" + "="*70)
+    print("PREPROCESSING")
+    print("="*70)
+    print(f"\nVoxel size: {args.voxel_size}")
+    
+    print("\nDownsampling and computing normals...")
+    source_down = preprocess_point_cloud(pred_norm, args.voxel_size)
+    print(f"  Source downsampled: {len(source_down.points):,} points")
+    
+    target_down = preprocess_point_cloud(gt_norm, args.voxel_size)
+    print(f"  Target downsampled: {len(target_down.points):,} points")
+    
+    # Compute FPFH features
+    print("\nComputing FPFH features...")
+    source_fpfh = compute_fpfh_features(source_down, args.voxel_size, args.fpfh_radius_multiplier)
+    target_fpfh = compute_fpfh_features(target_down, args.voxel_size, args.fpfh_radius_multiplier)
+    print(f"  Feature dimension: {source_fpfh.data.shape[0]}")
+    
+    # Global registration
+    print("\n" + "="*70)
+    print("GLOBAL REGISTRATION")
+    print("="*70)
+    
+    result_ransac = execute_global_registration(
+        source_down, target_down, source_fpfh, target_fpfh,
+        args.voxel_size, args.ransac_max_iterations, args.ransac_confidence
+    )
+    
+    # Transform from normalized space back to original space
+    transformation_normalized = result_ransac.transformation
+    transformation = denormalize_transformation(
+        transformation_normalized, pred_center, pred_scale, gt_center, gt_scale
+    )
+    
+    print(f"\nTransformation matrix (in original space):")
+    print(transformation)
+    
+    # ICP refinement
+    if not args.skip_icp:
+        print("\n" + "="*70)
+        print("ICP REFINEMENT")
+        print("="*70)
+        
+        # Apply initial transformation
+        source_temp = o3d.geometry.PointCloud()
+        source_temp.points = o3d.utility.Vector3dVector(pred_pcd)
+        source_temp.transform(transformation)
+        
+        # Downsample for ICP
+        source_temp = source_temp.voxel_down_sample(args.voxel_size)
+        target_temp = o3d.geometry.PointCloud()
+        target_temp.points = o3d.utility.Vector3dVector(gt_pcd)
+        target_temp = target_temp.voxel_down_sample(args.voxel_size)
+        
+        # Estimate normals for plane-to-plane ICP
+        if args.icp == 'plane':
+            source_temp.estimate_normals(
+                o3d.geometry.KDTreeSearchParamHybrid(radius=args.voxel_size * 2, max_nn=30))
+            target_temp.estimate_normals(
+                o3d.geometry.KDTreeSearchParamHybrid(radius=args.voxel_size * 2, max_nn=30))
+        
+        result_icp = refine_registration_icp(
+            source_temp, target_temp, np.identity(4),
+            args.icp_threshold, args.icp, args.max_icp_iterations
+        )
+        
+        transformation = result_icp.transformation @ transformation
+    
+    # Apply final transformation
+    print("\n" + "="*70)
+    print("APPLYING TRANSFORMATION")
+    print("="*70)
+    
+    aligned_pcd = trimesh.transformations.transform_points(pred_pcd, transformation)
+    print(f"\nTransformed {len(aligned_pcd):,} points")
+    
+    # Compute metrics
+    print("\n" + "="*70)
+    print("EVALUATION")
+    print("="*70)
+    
+    metrics, distances = compute_alignment_metrics(aligned_pcd, gt_pcd)
+    print_metrics(metrics)
+    
+    # Save aligned point cloud
+    if args.save_aligned:
+        print(f"\nSaving aligned point cloud to: {args.save_aligned}")
+        pcd_save = o3d.geometry.PointCloud()
+        pcd_save.points = o3d.utility.Vector3dVector(aligned_pcd)
+        o3d.io.write_point_cloud(args.save_aligned, pcd_save)
+        print("  Saved successfully!")
+    
+    # Visualize
+    if args.visualize:
+        visualize_alignment(pred_pcd, aligned_pcd, gt_pcd)
+    
+    print("\n" + "="*70)
+    print("COMPLETE!")
+    print("="*70 + "\n")
+    
+    return metrics
+
+if __name__ == "__main__":
+    main()

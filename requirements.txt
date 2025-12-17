@@ -1,4 +1,6 @@
 pillow
 numpy
 fastapi
+psutil
+pynvml
 uvicorn[standard]

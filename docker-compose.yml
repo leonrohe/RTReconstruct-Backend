@@ -6,6 +6,7 @@ services:
       dockerfile: dockerfiles/main.Dockerfile
     environment:
       - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
     ports:
       - "5000:5000"
     volumes:
@@ -13,6 +14,7 @@ services:
       - ./common_utils:/app/common_utils
       - ./models:/app/models
       - ./db:/app/db
+    runtime: nvidia
     entrypoint: ["uvicorn", "main.fragment_hub:app", "--host", "0.0.0.0", "--port", "5000"]
 
   neucon:

@@ -77,7 +77,7 @@ async def send_fragments(ws: websockets.WebSocketClientProtocol, directory: str,
         raise ValueError(f"Invalid directory: {directory}")
 
     # collect files first
-    files = [f for f in path.iterdir() if f.is_file()]
+    files = [f for f in path.iterdir() if f.is_file() and f.suffix == ".bin"]
 
     def extract_key(f: pathlib.Path):
         # Use stem to ignore extensions (if any), and rpartition to split at last underscore

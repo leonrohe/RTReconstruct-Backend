@@ -5,6 +5,7 @@ import sys
 import csv
 import logging
 from common_utils import myutils
+from common_utils.hardware_info import get_cpu_usage, get_gpu_usage, get_ram_usage
 from db.sqlite_db_handler import SQLiteDBHandler
 from typing import Any, Dict, List, Set
 
@@ -180,15 +181,15 @@ async def websocket_client_endpoint(websocket: WebSocket):
 @app.websocket("/ws/model/{model_name}")
 async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
     def init_csv() -> None:
-        header = ["in_size", "inference_time", "out_size"]
+        header = ["in_size", "inference_time", "out_size", "cpu_util", "gpu_util", "vram_util", "ram_util"]
         with open(f"{model_name}.csv", "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(header)
 
-    def append_csv(in_size: int, inference_time: float, out_size: int) -> None:
+    def append_csv(in_size: int, inference_time: float, out_size: int, cpu_util: float, gpu_util: float, vram_util: float, ram_util: float) -> None:
         with open(f"{model_name}.csv", "a", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([in_size, inference_time, out_size])
+            writer.writerow([in_size, inference_time, out_size, cpu_util, gpu_util, vram_util, ram_util])
 
     await websocket.accept()
 
@@ -209,6 +210,12 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                 await websocket.send_bytes(fragment)
                 logger.info(f"Sent fragment from queue to model [{model_name}] | fragments remaining in queue: {queue.qsize()}")
 
+                cpu_usage: float = get_cpu_usage()
+                gpu_usage: float = get_gpu_usage()["util_percent"]
+                vram_usage: float = get_gpu_usage()["memory_used_mb"] / get_gpu_usage()["memory_total_mb"] * 100
+                ram_usage: float = get_ram_usage()["percent"]
+                logger.info(f"System Usage before receiving result - CPU: {cpu_usage}%, GPU: {gpu_usage}%, VRAM: {vram_usage}%, RAM: {ram_usage}%")
+
                 # Wait for the model's result
                 result_bytes: bytes = await websocket.receive_bytes()
 
@@ -228,7 +235,15 @@ async def websocket_model_endpoint(websocket: WebSocket, model_name: str):
                     f"from model: {model_name}, PointCloud: {result.is_pointcloud}"
                 )
 
-                append_csv(len(fragment), elapsed_ms, len(result_bytes))
+                append_csv(
+                    len(fragment),
+                    elapsed_ms,
+                    len(result_bytes), 
+                    cpu_usage,
+                    gpu_usage,
+                    vram_usage,
+                    ram_usage
+                )
 
                 # Store the result by scene and model
                 scene = model_outputs.setdefault(result.scene_name, {})
